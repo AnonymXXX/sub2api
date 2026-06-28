@@ -575,6 +575,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/routing-audit',
+    name: 'AdminRoutingAudit',
+    component: () => import('@/views/admin/RoutingAuditView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Routing Audit',
+      titleKey: 'admin.routingAudit.title',
+      descriptionKey: 'admin.routingAudit.description'
+    }
+  },
+  {
     path: '/admin/affiliates',
     redirect: '/admin/affiliates/invites'
   },

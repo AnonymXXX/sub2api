@@ -80,6 +80,9 @@ func RegisterAdminRoutes(
 		// 使用记录管理
 		registerUsageRoutes(admin, h)
 
+		// 调度复盘
+		registerRoutingAuditRoutes(admin, h)
+
 		// 用户属性管理
 		registerUserAttributeRoutes(admin, h)
 
@@ -106,6 +109,14 @@ func RegisterAdminRoutes(
 
 		// 邀请返利（专属用户管理）
 		registerAffiliateRoutes(admin, h)
+	}
+}
+
+func registerRoutingAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	audit := admin.Group("/routing-audit")
+	{
+		audit.GET("/logs", h.Admin.RoutingAudit.List)
+		audit.GET("/summary", h.Admin.RoutingAudit.Summary)
 	}
 }
 

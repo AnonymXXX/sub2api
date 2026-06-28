@@ -32,6 +32,7 @@ type OpenAIGatewayHandler struct {
 	billingCacheService      *service.BillingCacheService
 	apiKeyService            *service.APIKeyService
 	usageRecordWorkerPool    *service.UsageRecordWorkerPool
+	routingAuditService      *service.RoutingAuditService
 	errorPassthroughService  *service.ErrorPassthroughService
 	contentModerationService *service.ContentModerationService
 	opsService               *service.OpsService
@@ -111,6 +112,7 @@ func NewOpenAIGatewayHandler(
 	billingCacheService *service.BillingCacheService,
 	apiKeyService *service.APIKeyService,
 	usageRecordWorkerPool *service.UsageRecordWorkerPool,
+	routingAuditService *service.RoutingAuditService,
 	errorPassthroughService *service.ErrorPassthroughService,
 	contentModerationService *service.ContentModerationService,
 	opsService *service.OpsService,
@@ -129,6 +131,7 @@ func NewOpenAIGatewayHandler(
 		billingCacheService:      billingCacheService,
 		apiKeyService:            apiKeyService,
 		usageRecordWorkerPool:    usageRecordWorkerPool,
+		routingAuditService:      routingAuditService,
 		errorPassthroughService:  errorPassthroughService,
 		contentModerationService: contentModerationService,
 		opsService:               opsService,
@@ -255,6 +258,16 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		h.errorResponse(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message)
 		return
 	}
+	privacyPrecheck := service.EvaluatePrivacyPrecheck(service.ContentModerationProtocolOpenAIResponses, body)
+	routeCtx := c.Request.Context()
+	if privacyPrecheck.Sensitive {
+		routeCtx = service.WithPrivacyRoutingAllowedPools(routeCtx, privacyPrecheck.AllowedPools)
+		reqLog.Info("openai.privacy_precheck_redirect",
+			zap.String("decision", privacyPrecheck.Decision),
+			zap.Strings("allowed_pools", privacyPrecheck.AllowedPools),
+			zap.Strings("categories", privacyPrecheck.Categories),
+		)
+	}
 
 	imageIntent := service.IsImageGenerationIntent("/v1/responses", reqModel, body)
 	if imageIntent && !service.GroupAllowsImageGeneration(apiKey.Group) {
@@ -331,7 +344,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// Select account supporting the requested model
 		reqLog.Debug("openai.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
 		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForCapability(
-			c.Request.Context(),
+			routeCtx,
 			apiKey.GroupID,
 			previousResponseID,
 			sessionHash,
@@ -434,6 +447,28 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			} else {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
+					h.recordOpenAIRoutingAudit(c.Request.Context(), service.RoutingAuditRecordInput{
+						RequestID:          "",
+						User:               apiKey.User,
+						APIKey:             apiKey,
+						Account:            account,
+						Model:              reqModel,
+						InboundEndpoint:    GetInboundEndpoint(c),
+						UpstreamEndpoint:   resolveOpenAIUpstreamEndpoint(c, account),
+						RequestType:        "responses",
+						Stream:             reqStream,
+						ScheduleDecision:   scheduleDecision,
+						Result:             result,
+						Err:                err,
+						UpstreamStatus:     intPtr(failoverErr.StatusCode),
+						FallbackReason:     "upstream_failover",
+						PrivacyDecision:    privacyPrecheck.Decision,
+						PrivacyRedirect:    privacyPrecheck.Sensitive,
+						ErrorRedirect:      true,
+						FinalRoute:         service.RoutingAuditFinalRouteOpenAI,
+						ChannelUsageFields: channelMapping.ToUsageFields(reqModel, ""),
+						DurationMs:         int(forwardDurationMs),
+					})
 					if c.Writer.Size() != writerSizeBeforeForward {
 						h.handleFailoverExhausted(c, failoverErr, true)
 						return
@@ -541,6 +576,25 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					zap.Int64("account_id", account.ID),
 				).Error("openai.record_usage_failed", zap.Error(err))
 			}
+		})
+		h.recordOpenAIRoutingAudit(c.Request.Context(), service.RoutingAuditRecordInput{
+			RequestID:          "",
+			User:               apiKey.User,
+			APIKey:             apiKey,
+			Account:            account,
+			Model:              reqModel,
+			InboundEndpoint:    inboundEndpoint,
+			UpstreamEndpoint:   upstreamEndpoint,
+			RequestType:        "responses",
+			Stream:             reqStream,
+			ScheduleDecision:   scheduleDecision,
+			Result:             result,
+			Err:                nil,
+			PrivacyDecision:    privacyPrecheck.Decision,
+			PrivacyRedirect:    privacyPrecheck.Sensitive,
+			FinalRoute:         service.RoutingAuditFinalRouteOpenAI,
+			ChannelUsageFields: channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
+			DurationMs:         int(forwardDurationMs),
 		})
 		reqLog.Debug("openai.request_completed",
 			zap.Int64("account_id", account.ID),
@@ -1780,6 +1834,30 @@ func (h *OpenAIGatewayHandler) submitMandatoryUsageRecordTask(parent context.Con
 		}
 	}()
 	task(ctx)
+}
+
+func (h *OpenAIGatewayHandler) recordOpenAIRoutingAudit(parent context.Context, input service.RoutingAuditRecordInput) {
+	if h == nil || h.routingAuditService == nil {
+		return
+	}
+	task := func(ctx context.Context) {
+		if err := h.routingAuditService.RecordOpenAIResponses(ctx, input); err != nil {
+			apiKeyID := int64(0)
+			if input.APIKey != nil {
+				apiKeyID = input.APIKey.ID
+			}
+			logger.L().With(
+				zap.String("component", "handler.openai_gateway.routing_audit"),
+				zap.Int64("api_key_id", apiKeyID),
+				zap.String("model", input.Model),
+			).Warn("openai.routing_audit_record_failed", zap.Error(err))
+		}
+	}
+	h.submitUsageRecordTask(parent, task)
+}
+
+func intPtr(v int) *int {
+	return &v
 }
 
 func (h *OpenAIGatewayHandler) acquireImageGenerationSlot(c *gin.Context, streamStarted bool) (func(), bool) {

@@ -87,6 +87,7 @@
           <button
             type="button"
             @click="form.platform = 'openai'"
+            data-testid="account-platform-openai"
             :class="[
               'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
               form.platform === 'openai'
@@ -2534,6 +2535,7 @@
         <div>
           <label class="input-label">{{ t('admin.accounts.concurrency') }}</label>
           <input v-model.number="form.concurrency" type="number" min="1" class="input"
+            data-testid="account-concurrency"
             @input="form.concurrency = Math.max(1, form.concurrency || 1)" />
         </div>
         <div>
@@ -2681,6 +2683,7 @@
           </div>
           <button
             type="button"
+            data-testid="openai-codex-cli-only-toggle"
             @click="codexCLIOnlyEnabled = !codexCLIOnlyEnabled"
             :class="[
               'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
@@ -3260,9 +3263,8 @@ import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import {
-  claudeModels,
   getPresetMappingsByPlatform,
-  getModelsByPlatform,
+  getDefaultAccountWhitelistModels,
   commonErrorCodes,
   buildModelMappingObject,
   fetchAntigravityDefaultMappings,
@@ -3629,6 +3631,7 @@ const mixedChannelWarningAction = ref<(() => Promise<void>) | null>(null)
 const antigravityMixedChannelConfirmed = ref(false)
 const showAdvancedOAuth = ref(false)
 const showGeminiHelpDialog = ref(false)
+const DEFAULT_ACCOUNT_CONCURRENCY = 5
 
 // Quota control state (Anthropic OAuth/SetupToken only)
 const windowCostEnabled = ref(false)
@@ -3765,13 +3768,25 @@ const form = reactive({
   type: 'oauth' as AccountType, // Will be 'oauth', 'setup-token', or 'apikey'
   credentials: {} as Record<string, unknown>,
   proxy_id: null as number | null,
-  concurrency: 10,
+  concurrency: DEFAULT_ACCOUNT_CONCURRENCY,
   load_factor: null as number | null,
   priority: 1,
   rate_multiplier: 1,
   group_ids: [] as number[],
   expires_at: null as number | null
 })
+
+const getDefaultGroupIdsForPlatform = (platform: AccountPlatform): number[] => {
+  if (platform !== 'openai') return []
+  const openAIGroup = props.groups.find(
+    (group) => group.platform === 'openai' && group.name === 'openai'
+  )
+  return openAIGroup ? [openAIGroup.id] : []
+}
+
+const applyDefaultGroupIds = (platform: AccountPlatform) => {
+  form.group_ids = getDefaultGroupIdsForPlatform(platform)
+}
 
 // Helper to check if current type needs OAuth flow
 const isOAuthFlow = computed(() => {
@@ -3824,7 +3839,10 @@ watch(
         .then(profiles => { tlsFingerprintProfiles.value = profiles.map(p => ({ id: p.id, name: p.name })) })
         .catch(() => { tlsFingerprintProfiles.value = [] })
       // Modal opened - fill related models
-      allowedModels.value = [...getModelsByPlatform(form.platform)]
+      allowedModels.value = [...getDefaultAccountWhitelistModels(form.platform)]
+      if (form.group_ids.length === 0) {
+        applyDefaultGroupIds(form.platform)
+      }
       // Antigravity: 默认使用映射模式并填充默认映射
       if (form.platform === 'antigravity') {
         antigravityModelRestrictionMode.value = 'mapping'
@@ -3884,6 +3902,7 @@ watch(
     // Clear model-related settings
     allowedModels.value = []
     modelMappings.value = []
+    applyDefaultGroupIds(newPlatform)
     // Antigravity: 默认使用映射模式并填充默认映射
     if (newPlatform === 'antigravity') {
       antigravityModelRestrictionMode.value = 'mapping'
@@ -3936,6 +3955,9 @@ watch(
       openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       codexCLIOnlyEnabled.value = false
       codexCLIOnlyAppServerEnabled.value = false
+    } else {
+      codexCLIOnlyEnabled.value = accountCategory.value === 'oauth-based'
+      codexCLIOnlyAppServerEnabled.value = false
     }
     if (newPlatform !== 'anthropic') {
       anthropicPassthroughEnabled.value = false
@@ -3955,14 +3977,22 @@ watch(
 watch(
   [accountCategory, () => form.platform],
   ([category, platform]) => {
-    if (platform === 'openai' && category !== 'oauth-based') {
-      codexCLIOnlyEnabled.value = false
+    if (platform === 'openai') {
+      codexCLIOnlyEnabled.value = category === 'oauth-based'
       codexCLIOnlyAppServerEnabled.value = false
     }
     if (platform !== 'anthropic' || category !== 'apikey') {
       anthropicPassthroughEnabled.value = false
       webSearchEmulationMode.value = 'default'
     }
+  }
+)
+
+watch(
+  () => props.groups,
+  () => {
+    if (!props.show || form.group_ids.length > 0) return
+    applyDefaultGroupIds(form.platform)
   }
 )
 
@@ -3995,7 +4025,7 @@ watch(
   [modelRestrictionMode, () => form.platform],
   ([newMode]) => {
     if (newMode === 'whitelist') {
-      allowedModels.value = [...getModelsByPlatform(form.platform)]
+      allowedModels.value = [...getDefaultAccountWhitelistModels(form.platform)]
     }
   }
 )
@@ -4294,11 +4324,11 @@ const resetForm = () => {
   form.type = 'oauth'
   form.credentials = {}
   form.proxy_id = null
-  form.concurrency = 10
+  form.concurrency = DEFAULT_ACCOUNT_CONCURRENCY
   form.load_factor = null
   form.priority = 1
   form.rate_multiplier = 1
-  form.group_ids = []
+  applyDefaultGroupIds(form.platform)
   form.expires_at = null
   accountCategory.value = 'oauth-based'
   addMethod.value = 'oauth'
@@ -4316,7 +4346,7 @@ const resetForm = () => {
   modelMappings.value = []
   openAICompactModelMappings.value = []
   modelRestrictionMode.value = 'whitelist'
-  allowedModels.value = [...claudeModels] // Default fill related models
+  allowedModels.value = [...getDefaultAccountWhitelistModels(form.platform)] // Default fill related models
 
   antigravityModelRestrictionMode.value = 'mapping'
   antigravityWhitelistModels.value = []

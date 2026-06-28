@@ -4,7 +4,13 @@ vi.mock('@/api/admin/accounts', () => ({
   getAntigravityDefaultModelMapping: vi.fn()
 }))
 
-import { buildModelMappingObject, getModelsByPlatform, splitModelMappingObject } from '../useModelWhitelist'
+import {
+  buildModelMappingObject,
+  defaultOpenAIAccountWhitelistModels,
+  getDefaultAccountWhitelistModels,
+  getModelsByPlatform,
+  splitModelMappingObject
+} from '../useModelWhitelist'
 
 describe('useModelWhitelist', () => {
   it('openai 模型列表包含 GPT-5.4 官方快照', () => {
@@ -25,6 +31,22 @@ describe('useModelWhitelist', () => {
     expect(models).not.toContain('gpt-5.1-codex-max')
     expect(models).not.toContain('gpt-5.1-codex-mini')
     expect(models).not.toContain('gpt-5.2-codex')
+  })
+
+  it('新增 OpenAI 账号默认只选择 Codex 相关模型', () => {
+    expect(getDefaultAccountWhitelistModels('openai')).toEqual([
+      'gpt-5.5',
+      'codex-auto-review',
+      'gpt-5.4',
+      'gpt-5.4-mini'
+    ])
+    expect(defaultOpenAIAccountWhitelistModels).not.toContain('gpt-image-1')
+    expect(defaultOpenAIAccountWhitelistModels).not.toContain('gpt-image-2')
+  })
+
+  it('非 OpenAI 新增账号默认仍填充平台相关模型', () => {
+    expect(getDefaultAccountWhitelistModels('anthropic')).toEqual(getModelsByPlatform('anthropic'))
+    expect(getDefaultAccountWhitelistModels('gemini')).toEqual(getModelsByPlatform('gemini'))
   })
 
   it('antigravity 模型列表包含图片模型兼容项', () => {

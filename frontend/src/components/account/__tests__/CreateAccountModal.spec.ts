@@ -273,7 +273,7 @@ describe('CreateAccountModal', () => {
     )
   })
 
-  it('切换到 OpenAI 时默认选中 openai 分组并使用保守并发', async () => {
+  it('切换到 OpenAI 时默认选中 openai 分组并使用 Plus 默认并发 2', async () => {
     const wrapper = mountModal()
 
     await wrapper.setProps({ show: true })
@@ -285,6 +285,7 @@ describe('CreateAccountModal', () => {
     await nextTick()
 
     expect(wrapper.get('[data-testid="group-selector-value"]').text()).toBe('6')
+    expect((wrapper.get('[data-testid="account-concurrency"]').element as HTMLInputElement).value).toBe('2')
     expect(wrapper.get('[data-testid="openai-codex-cli-only-toggle"]').classes()).toContain('bg-primary-600')
   })
 })

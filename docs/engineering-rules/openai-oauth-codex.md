@@ -29,7 +29,7 @@ Do not default new OpenAI accounts to every OpenAI model. In this LAN deployment
 
 For the local LAN deployment, new OpenAI OAuth accounts should use conservative Codex-first defaults:
 
-- default account concurrency: `5`
+- default account concurrency: `2`
 - default group: the active OpenAI group named `openai`
 - default client policy: Codex CLI only enabled
 - image generation disabled at the group level

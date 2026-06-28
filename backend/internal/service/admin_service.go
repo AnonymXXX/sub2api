@@ -2573,6 +2573,9 @@ func (s *adminServiceImpl) GetAccountsByIDs(ctx context.Context, ids []int64) ([
 }
 
 func normalizeAccountConcurrency(platform, accountType string, concurrency int) int {
+	if platform == PlatformOpenAI && isOpenAIPlusAccountType(accountType) && concurrency <= 0 {
+		return openai.DefaultPlusAccountConcurrency
+	}
 	if platform == PlatformGrok && accountType == AccountTypeOAuth {
 		if concurrency <= 0 {
 			return 1
@@ -2582,6 +2585,10 @@ func normalizeAccountConcurrency(platform, accountType string, concurrency int) 
 		}
 	}
 	return concurrency
+}
+
+func isOpenAIPlusAccountType(accountType string) bool {
+	return accountType == AccountTypeOAuth || accountType == AccountTypeSetupToken
 }
 
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {

@@ -6,7 +6,9 @@ vi.mock('@/api/admin/accounts', () => ({
 
 import {
   buildModelMappingObject,
+  DEFAULT_OPENAI_PLUS_ACCOUNT_CONCURRENCY,
   defaultOpenAIAccountWhitelistModels,
+  getDefaultAccountConcurrency,
   getDefaultAccountWhitelistModels,
   getModelsByPlatform,
   splitModelMappingObject
@@ -42,6 +44,14 @@ describe('useModelWhitelist', () => {
     ])
     expect(defaultOpenAIAccountWhitelistModels).not.toContain('gpt-image-1')
     expect(defaultOpenAIAccountWhitelistModels).not.toContain('gpt-image-2')
+  })
+
+  it('新增 OpenAI Plus 账号默认并发为 2', () => {
+    expect(getDefaultAccountConcurrency('openai', 'oauth')).toBe(DEFAULT_OPENAI_PLUS_ACCOUNT_CONCURRENCY)
+    expect(getDefaultAccountConcurrency('openai', 'setup-token')).toBe(2)
+    expect(getDefaultAccountConcurrency('openai', 'apikey')).toBe(5)
+    expect(getDefaultAccountConcurrency('anthropic')).toBe(5)
+    expect(getDefaultAccountConcurrency('grok')).toBe(1)
   })
 
   it('非 OpenAI 新增账号默认仍填充平台相关模型', () => {

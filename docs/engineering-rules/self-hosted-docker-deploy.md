@@ -1,0 +1,124 @@
+# Self-Hosted Docker Deploy Rules
+
+Use a dedicated long-lived custom branch for this self-hosted deployment. Do not deploy from one-off feature branches after validation; merge or cherry-pick the intended commits into the custom branch first.
+
+Current custom branch:
+
+- `anonym/custom`
+
+## Safety rules
+
+- Never print `.env`, config secrets, database rows, OAuth tokens, API keys, cookies, SSH passwords, or account credentials during deployment.
+- Take a PostgreSQL backup before replacing the application container.
+- Rebuild only the application image and recreate only the application container unless the change explicitly requires database or Redis maintenance.
+- Keep PostgreSQL and Redis containers and their data volumes running during ordinary application updates.
+- Verify the exact commit built into the image before considering deployment complete.
+
+## Standard flow
+
+1. Commit and push changes to the custom branch.
+2. On the server, update the build checkout to the same custom branch.
+3. Build the local application image with the same image tag used by the compose override.
+4. Recreate the application container without recreating dependencies.
+5. Verify health, commit, migrations, and key routes.
+
+## Server layout
+
+Use placeholders in documentation and scripts. The current production shape is:
+
+- runtime directory: `/opt/sub2api`
+- build checkout: `/opt/sub2api-build`
+- local app image: `sub2api-local:codex-default-models`
+- compose override: runtime directory `docker-compose.override.yml`
+
+The runtime directory owns `.env`, persistent app data, PostgreSQL data, Redis data, and backups. The build checkout is disposable source code for building the image.
+
+## Commands
+
+Update build checkout:
+
+```bash
+cd /opt/sub2api-build
+git fetch origin anonym/custom
+git checkout -B anonym/custom origin/anonym/custom
+git rev-parse HEAD
+git status --short
+```
+
+Backup database:
+
+```bash
+ts=$(date +%Y%m%d%H%M%S)
+mkdir -p /opt/sub2api/backups
+docker exec sub2api-postgres sh -lc 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' \
+  | gzip > "/opt/sub2api/backups/pre-deploy-${ts}.sql.gz"
+ls -lh "/opt/sub2api/backups/pre-deploy-${ts}.sql.gz"
+```
+
+Build image:
+
+```bash
+cd /opt/sub2api-build
+docker build \
+  --build-arg COMMIT=$(git rev-parse --short HEAD) \
+  --build-arg NODE_OPTIONS=--max-old-space-size=1536 \
+  -t sub2api-local:codex-default-models .
+```
+
+If the server is memory constrained and Go compilation is killed, temporarily add swap for the build and remove it after deployment:
+
+```bash
+fallocate -l 4G /swapfile-sub2api-build || dd if=/dev/zero of=/swapfile-sub2api-build bs=1M count=4096
+chmod 600 /swapfile-sub2api-build
+mkswap /swapfile-sub2api-build
+swapon /swapfile-sub2api-build
+
+# rerun docker build here
+
+swapoff /swapfile-sub2api-build
+rm -f /swapfile-sub2api-build
+```
+
+Recreate app container only:
+
+```bash
+cd /opt/sub2api
+docker compose up -d --no-deps --force-recreate sub2api
+```
+
+## Verification
+
+Health and containers:
+
+```bash
+curl -fsS http://127.0.0.1:8080/health
+docker ps --format '{{.Names}}\t{{.Image}}\t{{.Status}}' | grep -E 'sub2api|postgres|redis'
+docker inspect sub2api --format 'health={{.State.Health.Status}} image={{.Config.Image}} started={{.State.StartedAt}}'
+```
+
+Image commit:
+
+```bash
+docker exec sub2api /app/sub2api --version
+```
+
+This command prints the version and may then try to continue normal startup, which can log an expected `address already in use` error because the real server is already running. Treat the printed commit as the verification signal.
+
+Migration check example:
+
+```bash
+docker exec sub2api-postgres sh -lc 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select to_regclass('\''public.routing_audit_logs'\'') is not null;"'
+```
+
+Route check example:
+
+```bash
+curl -sS -o /tmp/route-check.txt -w '%{http_code}\n' \
+  http://127.0.0.1:8080/api/v1/admin/routing-audit/logs
+```
+
+An unauthenticated admin route should return `401`, not `404`.
+
+## Rollback
+
+Use the previous local image or rebuild from the previous known-good commit, then recreate only the application container. Restore the database backup only if a migration or data write must be reverted; do not restore data as a routine code rollback step.

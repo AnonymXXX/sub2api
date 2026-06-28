@@ -42,3 +42,5 @@ Validation:
 cd backend && go test ./internal/service -run 'TestApplyCodexOAuthTransform_StripsMaxOutputTokens|TestOpenAIGatewayService_OAuthResponsesStripsMaxOutputTokens|TestOpenAIGatewayService_OAuthResponsesAppliesForcedCodexInstructionsTemplate'
 cd frontend && pnpm test:run src/composables/__tests__/useModelWhitelist.spec.ts src/components/account/__tests__/CreateAccountModal.spec.ts
 ```
+
+Deployment for this self-hosted Codex pool follows `docs/engineering-rules/self-hosted-docker-deploy.md`; deploy from the long-lived custom branch instead of transient feature branches.

@@ -2763,6 +2763,31 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		} else {
 			codexResult = applyCodexOAuthTransform(decoded, isCodexCLI, isCompactRequest)
 		}
+		forcedTemplateText := ""
+		if s.cfg != nil {
+			forcedTemplateText = s.cfg.Gateway.ForcedCodexInstructionsTemplate
+		}
+		templateUpstreamModel := upstreamModel
+		if codexResult.NormalizedModel != "" {
+			templateUpstreamModel = codexResult.NormalizedModel
+		}
+		existingInstructions, _ := decoded["instructions"].(string)
+		if strings.TrimSpace(existingInstructions) == "" {
+			existingInstructions = extractPromptLikeInstructionsFromInput(decoded)
+		}
+		templateModified, templateErr := applyForcedCodexInstructionsTemplate(decoded, forcedTemplateText, forcedCodexInstructionsTemplateData{
+			ExistingInstructions: strings.TrimSpace(existingInstructions),
+			OriginalModel:        originalModel,
+			NormalizedModel:      codexResult.NormalizedModel,
+			BillingModel:         billingModel,
+			UpstreamModel:        templateUpstreamModel,
+		})
+		if templateErr != nil {
+			return nil, templateErr
+		}
+		if templateModified {
+			markDecodedModified()
+		}
 		if codexResult.Modified {
 			markDecodedModified()
 		}

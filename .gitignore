@@ -131,6 +131,8 @@ docs/*
 !docs/PAYMENT.md
 !docs/PAYMENT_CN.md
 !docs/ADMIN_PAYMENT_INTEGRATION_API.md
+!docs/engineering-rules/
+!docs/engineering-rules/*.md
 !docs/legal/
 !docs/legal/*.md
 .serena/

@@ -60,7 +60,7 @@ Source requirement: `docs/product-specs/codex-hybrid-routing-policy.md`.
 ### Validation And Deployment Status
 
 - Current documented validation commands: `go test ./internal/service ./internal/repository ./internal/handler/admin` and `npm run typecheck`.
-- Latest source checkout status, reviewed on 2026-06-29: local `anonym/custom`, `origin/anonym/custom`, and server `/opt/sub2api-build` all point to `b6679c83`.
+- Latest source checkout status, reviewed on 2026-06-29: local `anonym/custom`, `origin/anonym/custom`, and server `/opt/sub2api-build` all point to docs-only deployment-ledger commit `95a9a34a`.
 - Latest live service status, reviewed on 2026-06-29: `sub2api`, `sub2api-postgres`, and `sub2api-redis` were healthy; `/health` returned `{"status":"ok"}`.
 - Latest application image was rebuilt and the `sub2api` container was recreated from commit `b6679c83`; `docker exec sub2api /app/sub2api --version` reported commit `b6679c83`.
 - Pre-deploy database backup was created at `/opt/sub2api/backups/pre-deploy-20260629020411.sql.gz`.

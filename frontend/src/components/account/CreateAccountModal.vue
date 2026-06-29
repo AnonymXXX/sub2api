@@ -3265,7 +3265,6 @@ import { useAppStore } from '@/stores/app'
 import {
   getPresetMappingsByPlatform,
   getDefaultAccountWhitelistModels,
-  getDefaultAccountConcurrency,
   commonErrorCodes,
   buildModelMappingObject,
   fetchAntigravityDefaultMappings,
@@ -3632,7 +3631,7 @@ const mixedChannelWarningAction = ref<(() => Promise<void>) | null>(null)
 const antigravityMixedChannelConfirmed = ref(false)
 const showAdvancedOAuth = ref(false)
 const showGeminiHelpDialog = ref(false)
-const DEFAULT_ACCOUNT_CONCURRENCY = getDefaultAccountConcurrency('anthropic', 'oauth')
+const DEFAULT_ACCOUNT_CONCURRENCY = 5
 
 // Quota control state (Anthropic OAuth/SetupToken only)
 const windowCostEnabled = ref(false)
@@ -3924,7 +3923,7 @@ watch(
       accountCategory.value = 'oauth-based'
       addMethod.value = 'oauth'
       modelRestrictionMode.value = 'mapping'
-      form.concurrency = getDefaultAccountConcurrency(newPlatform, form.type)
+      form.concurrency = 1
       form.load_factor = null
     }
     if (newPlatform !== 'gemini' && newPlatform !== 'anthropic' && accountCategory.value === 'service_account') {
@@ -3971,15 +3970,6 @@ watch(
     geminiOAuth.resetState()
     antigravityOAuth.resetState()
     grokOAuth.resetState()
-  }
-)
-
-watch(
-  [() => form.platform, () => form.type],
-  ([platform, accountType], [previousPlatform, previousAccountType]) => {
-    const previousDefault = getDefaultAccountConcurrency(previousPlatform, previousAccountType)
-    if (form.concurrency !== previousDefault) return
-    form.concurrency = getDefaultAccountConcurrency(platform, accountType)
   }
 )
 
@@ -4334,7 +4324,7 @@ const resetForm = () => {
   form.type = 'oauth'
   form.credentials = {}
   form.proxy_id = null
-  form.concurrency = getDefaultAccountConcurrency(form.platform, form.type)
+  form.concurrency = DEFAULT_ACCOUNT_CONCURRENCY
   form.load_factor = null
   form.priority = 1
   form.rate_multiplier = 1

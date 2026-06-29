@@ -361,7 +361,6 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 			out.QuotaNotifyTotalThreshold = &threshold
 		}
 	}
-	out.RelayQuotaSummary = service.BuildRelayQuotaSummary(a)
 
 	return out
 }

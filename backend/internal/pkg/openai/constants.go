@@ -30,25 +30,6 @@ var DefaultModels = []Model{
 	{ID: "gpt-image-2", Object: "model", Created: 1738368000, OwnedBy: "openai", Type: "model", DisplayName: "GPT Image 2"},
 }
 
-var defaultCodexAccountWhitelistModelIDs = []string{
-	"gpt-5.5",
-	"codex-auto-review",
-	"gpt-5.4",
-	"gpt-5.4-mini",
-}
-
-func DefaultCodexAccountWhitelistModelIDs() []string {
-	ids := make([]string, len(defaultCodexAccountWhitelistModelIDs))
-	copy(ids, defaultCodexAccountWhitelistModelIDs)
-	return ids
-}
-
-func DefaultCodexAccountWhitelistModelCount() int {
-	return len(defaultCodexAccountWhitelistModelIDs)
-}
-
-const DefaultPlusAccountConcurrency = 2
-
 // DefaultModelIDs returns the default model ID list
 func DefaultModelIDs() []string {
 	ids := make([]string, len(DefaultModels))

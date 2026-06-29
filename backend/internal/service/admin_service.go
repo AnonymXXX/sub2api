@@ -103,7 +103,6 @@ type AdminService interface {
 	// RevertAccountProxyFallback 将账号的 proxy_id 切回 proxy_fallback_origin_id，并清空 origin 字段。
 	// 若账号不存在返回 ErrAccountNotFound；若账号存在但不在 fallback 状态，返回 ErrAccountNotInFallback。
 	RevertAccountProxyFallback(ctx context.Context, id int64) error
-	RefreshRelayQuotaSummary(ctx context.Context, id int64) (*RelayQuotaSummary, error)
 
 	// Proxy management
 	ListProxies(ctx context.Context, page, pageSize int, protocol, status, search string, sortBy, sortOrder string) ([]Proxy, int64, error)
@@ -2574,9 +2573,6 @@ func (s *adminServiceImpl) GetAccountsByIDs(ctx context.Context, ids []int64) ([
 }
 
 func normalizeAccountConcurrency(platform, accountType string, concurrency int) int {
-	if platform == PlatformOpenAI && isOpenAIPlusAccountType(accountType) && concurrency <= 0 {
-		return openai.DefaultPlusAccountConcurrency
-	}
 	if platform == PlatformGrok && accountType == AccountTypeOAuth {
 		if concurrency <= 0 {
 			return 1
@@ -2586,10 +2582,6 @@ func normalizeAccountConcurrency(platform, accountType string, concurrency int) 
 		}
 	}
 	return concurrency
-}
-
-func isOpenAIPlusAccountType(accountType string) bool {
-	return accountType == AccountTypeOAuth || accountType == AccountTypeSetupToken
 }
 
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {

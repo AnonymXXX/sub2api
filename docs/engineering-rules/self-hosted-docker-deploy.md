@@ -107,20 +107,14 @@ docker exec sub2api /app/sub2api --version
 
 This command prints the version and may then try to continue normal startup, which can log an expected `address already in use` error because the real server is already running. Treat the printed commit as the verification signal.
 
-Migration check example:
-
-```bash
-docker exec sub2api-postgres sh -lc 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select to_regclass('\''public.routing_audit_logs'\'') is not null;"'
-```
-
 Route check example:
 
 ```bash
 curl -sS -o /tmp/route-check.txt -w '%{http_code}\n' \
-  http://127.0.0.1:8080/api/v1/admin/routing-audit/logs
+  http://127.0.0.1:8080/health
 ```
 
-An unauthenticated admin route should return `401`, not `404`.
+The health route should return `200`.
 
 ## Rollback
 

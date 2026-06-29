@@ -416,7 +416,6 @@ export default {
     channelMonitor: 'Channel Monitor',
     channelStatus: 'Channel Status',
     riskControl: 'Risk Control',
-    routingAudit: 'Routing Audit',
   },
 
   // Auth
@@ -4726,11 +4725,6 @@ export default {
           canceled: 'Canceled'
         }
       }
-    },
-
-    routingAudit: {
-      title: 'Routing Audit',
-      description: 'Review routing between local Plus pools and relay subscriptions'
     },
 
     // Ops Monitoring

@@ -416,7 +416,6 @@ export default {
     channelMonitor: '渠道监控',
     channelStatus: '渠道状态',
     riskControl: '风控中心',
-    routingAudit: '调度复盘',
   },
 
   // Auth
@@ -4879,11 +4878,6 @@ export default {
           canceled: '已取消'
         }
       }
-    },
-
-    routingAudit: {
-      title: '调度复盘',
-      description: '复盘本地 Plus 号池与中转订阅的分流、隐私过滤和额度改道'
     },
 
     // Ops Monitoring

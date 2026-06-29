@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
-	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 type User struct {
@@ -229,13 +228,12 @@ type Account struct {
 	CustomBaseURL        *string `json:"custom_base_url,omitempty"`
 
 	// API Key 账号配额限制
-	QuotaLimit        *float64                   `json:"quota_limit,omitempty"`
-	QuotaUsed         *float64                   `json:"quota_used,omitempty"`
-	QuotaDailyLimit   *float64                   `json:"quota_daily_limit,omitempty"`
-	QuotaDailyUsed    *float64                   `json:"quota_daily_used,omitempty"`
-	QuotaWeeklyLimit  *float64                   `json:"quota_weekly_limit,omitempty"`
-	QuotaWeeklyUsed   *float64                   `json:"quota_weekly_used,omitempty"`
-	RelayQuotaSummary *service.RelayQuotaSummary `json:"relay_quota_summary,omitempty"`
+	QuotaLimit       *float64 `json:"quota_limit,omitempty"`
+	QuotaUsed        *float64 `json:"quota_used,omitempty"`
+	QuotaDailyLimit  *float64 `json:"quota_daily_limit,omitempty"`
+	QuotaDailyUsed   *float64 `json:"quota_daily_used,omitempty"`
+	QuotaWeeklyLimit *float64 `json:"quota_weekly_limit,omitempty"`
+	QuotaWeeklyUsed  *float64 `json:"quota_weekly_used,omitempty"`
 
 	// 配额固定时间重置配置
 	QuotaDailyResetMode  *string `json:"quota_daily_reset_mode,omitempty"`

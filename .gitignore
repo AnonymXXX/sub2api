@@ -134,9 +134,7 @@ docs/*
 !docs/engineering-rules/
 !docs/engineering-rules/*.md
 !docs/exec-plans/
-!docs/exec-plans/*.md
-!docs/product-specs/
-!docs/product-specs/*.md
+!docs/exec-plans/rollback-before-apipod.md
 !docs/legal/
 !docs/legal/*.md
 .serena/

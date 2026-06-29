@@ -80,9 +80,6 @@ func RegisterAdminRoutes(
 		// 使用记录管理
 		registerUsageRoutes(admin, h)
 
-		// 调度复盘
-		registerRoutingAuditRoutes(admin, h)
-
 		// 用户属性管理
 		registerUserAttributeRoutes(admin, h)
 
@@ -109,14 +106,6 @@ func RegisterAdminRoutes(
 
 		// 邀请返利（专属用户管理）
 		registerAffiliateRoutes(admin, h)
-	}
-}
-
-func registerRoutingAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
-	audit := admin.Group("/routing-audit")
-	{
-		audit.GET("/logs", h.Admin.RoutingAudit.List)
-		audit.GET("/summary", h.Admin.RoutingAudit.Summary)
 	}
 }
 
@@ -328,7 +317,6 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		accounts.POST("/today-stats/batch", h.Admin.Account.GetBatchTodayStats)
 		accounts.POST("/:id/clear-rate-limit", h.Admin.Account.ClearRateLimit)
 		accounts.POST("/:id/reset-quota", h.Admin.Account.ResetQuota)
-		accounts.POST("/:id/relay-quota/refresh", h.Admin.Account.RefreshRelayQuota)
 		accounts.GET("/:id/temp-unschedulable", h.Admin.Account.GetTempUnschedulable)
 		accounts.DELETE("/:id/temp-unschedulable", h.Admin.Account.ClearTempUnschedulable)
 		accounts.POST("/:id/schedulable", h.Admin.Account.SetSchedulable)

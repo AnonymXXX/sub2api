@@ -1077,9 +1077,6 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatible(ctx context.C
 	if account == nil {
 		return false
 	}
-	if !IsAccountAllowedByPrivacyRoutingContext(ctx, account) {
-		return false
-	}
 	if s != nil && s.service != nil && s.service.isOpenAIAccountRuntimeBlocked(account) {
 		return false
 	}

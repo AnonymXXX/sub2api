@@ -903,6 +903,7 @@ export interface Account {
   quota_daily_used?: number | null
   quota_weekly_limit?: number | null
   quota_weekly_used?: number | null
+  relay_quota_summary?: RelayQuotaSummary | null
 
   // 配额固定时间重置配置
   quota_daily_reset_mode?: 'rolling' | 'fixed' | null
@@ -918,6 +919,30 @@ export interface Account {
   current_window_cost?: number | null // 当前窗口费用
   active_sessions?: number | null // 当前活跃会话数
   current_rpm?: number | null // 当前分钟 RPM 计数
+}
+
+export interface RelayQuotaSummary {
+  provider?: string
+  pool?: string
+  plan_name?: string
+  subscription_status?: string
+  subscription_source?: string
+  balance_remaining?: number | null
+  balance_unit?: string
+  balance_source?: string
+  balance_synced_at?: string
+  balance_valid?: boolean | null
+  daily_limit_usd?: number | null
+  weekly_limit_usd?: number | null
+  monthly_limit_usd?: number | null
+  rate_multiplier?: number | null
+  plan_price?: number | null
+  plan_currency?: string
+  validity_days?: number | null
+  last_synced_at?: string
+  error?: string
+  refreshable: boolean
+  subscription_refreshable: boolean
 }
 
 // Account Usage types

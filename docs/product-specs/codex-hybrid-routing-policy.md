@@ -107,9 +107,20 @@ They should store reviewable metadata:
 - Plus pool snapshot at decision time
 - APIPod quota snapshot at decision time
 
+The admin routing audit page should make chart-based review the primary workflow. It should visualize request success, redirect composition, pool share, decision-reason share, token/cost concentration, latency, and latest pool/quota pressure from aggregate metadata only. Tables remain available for exact values and request-level drilldown, but operators should be able to judge routing health from the chart panels first without exposing prompt text or secrets.
+
 APIPod quota snapshots should include daily/weekly/monthly limit, used, remaining, used percent, quota source, and whether warning/degrade/disable thresholds were active.
 
 Plus snapshots should include total/active/available/rate-limited/error account counts, reset timing summaries, and available concurrency summaries.
+
+Relay accounts such as APIPod should show a compact quota/subscription summary in the account management list. The preferred display is upstream balance and active subscription status. If the upstream does not expose a stable subscription API, the UI should fall back to configured package limits plus locally recorded usage, and clearly mark the data source as local estimate or configured metadata rather than upstream-confirmed balance.
+
+APIPod Code exposes two useful quota surfaces:
+
+- API-key balance: `GET /v1/usage`, authorized with the OpenAI-compatible API key. The response should be parsed like cc-switch: `remaining`, `quota.remaining`, or `balance`, plus `unit`.
+- Web subscription catalog: `GET /api/v1/subscriptions?timezone=Asia%2FShanghai`, authorized with an APIPod web session token. This is optional and must not be required for normal operation. When present, plan fields include `name`, `price`, `rate_multiplier`, `daily_limit_usd`, `weekly_limit_usd`, `monthly_limit_usd`, and `validity_days`.
+
+The currently expected APIPod plan is `Codex Basic`: `249 RMB/month`, `0.8x`, daily `$150`, weekly `$550`, monthly `$1500`, valid for `30` days. If no active subscription can be queried, display this as configured/package metadata rather than active-subscription proof.
 
 After APIPod is connected, run at least 48 hours of observation before changing thresholds. Review:
 
@@ -122,7 +133,7 @@ After APIPod is connected, run at least 48 hours of observation before changing 
 
 ## Current Implementation Status
 
-- Implemented: routing audit table/API/UI, privacy precheck metadata, local Plus default model whitelist, Plus default concurrency `2`, and deployment branch/runbook.
+- Implemented: routing audit table/API/UI, privacy precheck metadata, local Plus default model whitelist, Plus default concurrency `2`, deployment branch/runbook, and account-list APIPod quota/subscription summary display.
 - Implemented: high-confidence rule precheck redirects obvious secret-bearing OpenAI Responses requests to trusted Plus.
 - Configured in live backend: APIPod Code upstream account is connected as account `24`, bound to the `openai` group, marked `routing_pool=relay-apipod`, and populated with current upstream model mapping.
 - Partially supported by configuration: APIPod participates in ordinary OpenAI Responses scheduling and can be preferred by priority, but the advanced scheduler uses top-K weighted selection, so it does not provide strict "APIPod first, Plus only as fallback" behavior.

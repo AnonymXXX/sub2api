@@ -519,6 +519,7 @@
     <!-- Key/Bedrock accounts: show today stats + optional quota bars -->
     <div v-else class="space-y-1">
       <!-- Today stats row (requests, tokens, cost, user_cost) -->
+      <RelayQuotaSummaryCell v-if="account.relay_quota_summary" :account="account" />
       <div
         v-if="todayStats"
         class="mb-0.5 flex items-center"
@@ -592,6 +593,7 @@ import UsageProgressBar from './UsageProgressBar.vue'
 import AccountQuotaInfo from './AccountQuotaInfo.vue'
 import OpenAIQuotaResetCell from './OpenAIQuotaResetCell.vue'
 import GrokQuotaProbeCell from './GrokQuotaProbeCell.vue'
+import RelayQuotaSummaryCell from './RelayQuotaSummaryCell.vue'
 
 // Module-level cache shared across all AccountUsageCell instances
 const _usageCache = new Map<number, { data: AccountUsageInfo; ts: number }>()

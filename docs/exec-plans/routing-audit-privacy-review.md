@@ -38,6 +38,8 @@ Source requirement: `docs/product-specs/codex-hybrid-routing-policy.md`.
 - Synced APIPod model mapping from its upstream `/v1/models`; current mapped models include `gpt-5.5`, `codex-auto-review`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.2`, `gpt-5.3-codex`, `gpt-5.3-codex-spark`, and `gpt-image-2`.
 - Verified Redis scheduler snapshots for `6:openai:single` and `6:openai:forced` include APIPod account `24`.
 - Verified high-confidence secret-bearing Responses requests are redirected to `trusted-plus` by rule precheck before scheduling.
+- Implemented account-list relay quota/subscription summary for APIPod-style OpenAI API-key relay accounts, including `/v1/usage` balance refresh, optional `/api/v1/subscriptions?timezone=Asia%2FShanghai` catalog refresh, and front-end display of balance, plan, daily/weekly/monthly limits, price, sync time, and refresh errors.
+- Added tests for APIPod quota summary assembly, supported balance response shapes, plan selection, and redaction of web subscription/session token fields.
 
 ### Pending
 
@@ -90,5 +92,5 @@ Source requirement: `docs/product-specs/codex-hybrid-routing-policy.md`.
 
 ## Validation
 
-- Backend: `go test ./internal/service ./internal/repository ./internal/handler/admin`
+- Backend: `go test ./internal/service ./internal/handler/dto ./internal/handler/admin ./internal/server/routes`
 - Frontend: `npm run typecheck`

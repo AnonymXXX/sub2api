@@ -20,7 +20,8 @@ import type {
   CodexSessionImportResult,
   OpenAICodexPATCreateRequest,
   CheckMixedChannelRequest,
-  CheckMixedChannelResponse
+  CheckMixedChannelResponse,
+  RelayQuotaSummary
 } from '@/types'
 
 /**
@@ -264,6 +265,13 @@ export async function getUsage(id: number, source?: 'passive' | 'active', force?
   const { data } = await apiClient.get<AccountUsageInfo>(`/admin/accounts/${id}/usage`, {
     params: Object.keys(params).length > 0 ? params : undefined
   })
+  return data
+}
+
+export async function refreshRelayQuota(id: number): Promise<{ summary: RelayQuotaSummary | null }> {
+  const { data } = await apiClient.post<{ summary: RelayQuotaSummary | null }>(
+    `/admin/accounts/${id}/relay-quota/refresh`
+  )
   return data
 }
 
@@ -796,6 +804,7 @@ export const accountsAPI = {
   getStats,
   clearError,
   getUsage,
+  refreshRelayQuota,
   getTodayStats,
   getBatchTodayStats,
   clearRateLimit,

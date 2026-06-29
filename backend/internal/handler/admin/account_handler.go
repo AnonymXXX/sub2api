@@ -466,6 +466,24 @@ func (h *AccountHandler) GetByID(c *gin.Context) {
 	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
 }
 
+// RefreshRelayQuota refreshes a relay account balance/subscription summary.
+// POST /api/v1/admin/accounts/:id/relay-quota/refresh
+func (h *AccountHandler) RefreshRelayQuota(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+
+	summary, err := h.adminService.RefreshRelayQuotaSummary(c.Request.Context(), accountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, service.RelayQuotaRefreshResult{Summary: summary})
+}
+
 // CheckMixedChannel handles checking mixed channel risk for account-group binding.
 // POST /api/v1/admin/accounts/check-mixed-channel
 func (h *AccountHandler) CheckMixedChannel(c *gin.Context) {

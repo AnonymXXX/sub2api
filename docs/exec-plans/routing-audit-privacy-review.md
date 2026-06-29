@@ -40,6 +40,7 @@ Source requirement: `docs/product-specs/codex-hybrid-routing-policy.md`.
 - Verified high-confidence secret-bearing Responses requests are redirected to `trusted-plus` by rule precheck before scheduling.
 - Implemented account-list relay quota/subscription summary for APIPod-style OpenAI API-key relay accounts, including `/v1/usage` balance refresh, optional `/api/v1/subscriptions?timezone=Asia%2FShanghai` catalog refresh, and front-end display of balance, plan, daily/weekly/monthly limits, price, sync time, and refresh errors.
 - Added tests for APIPod quota summary assembly, supported balance response shapes, plan selection, and redaction of web subscription/session token fields.
+- Implemented chart-first routing audit dashboard with aggregate-only request outcome, redirect composition, token mix, pool distribution, decision-reason cost, pool pressure, current-page model token, and latency charts.
 
 ### Pending
 
@@ -59,9 +60,11 @@ Source requirement: `docs/product-specs/codex-hybrid-routing-policy.md`.
 ### Validation And Deployment Status
 
 - Current documented validation commands: `go test ./internal/service ./internal/repository ./internal/handler/admin` and `npm run typecheck`.
-- Latest source checkout status, reviewed on 2026-06-29: local `anonym/custom`, `origin/anonym/custom`, and server `/opt/sub2api-build` all point to `54914743`.
+- Latest source checkout status, reviewed on 2026-06-29: local `anonym/custom`, `origin/anonym/custom`, and server `/opt/sub2api-build` all point to `b6679c83`.
 - Latest live service status, reviewed on 2026-06-29: `sub2api`, `sub2api-postgres`, and `sub2api-redis` were healthy; `/health` returned `{"status":"ok"}`.
-- The currently running application image was not rebuilt from `54914743` because that commit only updated documentation.
+- Latest application image was rebuilt and the `sub2api` container was recreated from commit `b6679c83`; `docker exec sub2api /app/sub2api --version` reported commit `b6679c83`.
+- Pre-deploy database backup was created at `/opt/sub2api/backups/pre-deploy-20260629020411.sql.gz`.
+- Deployment verification returned `401` for unauthenticated `/api/v1/admin/routing-audit/logs`, confirming the admin route exists, and confirmed `public.routing_audit_logs` exists.
 - APIPod validation on 2026-06-29:
   - A direct upstream model-list check succeeded with `8` models.
   - A single ordinary short Responses request selected `trusted-plus` account `21`, showing strict APIPod default routing is not guaranteed by current advanced scheduling.

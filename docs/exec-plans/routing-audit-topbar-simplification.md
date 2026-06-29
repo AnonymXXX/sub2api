@@ -28,8 +28,8 @@
 
 ## Release Status
 
-- [ ] Commit feature branch `anonym/routing-audit-topbar`.
-- [ ] Merge into deployment branch `anonym/custom`.
+- [x] Commit feature branch `anonym/routing-audit-topbar` (`a6d79fa4`).
+- [x] Merge into deployment branch `anonym/custom`.
 - [ ] Push `anonym/custom`.
 - [ ] Deploy from `anonym/custom` using `docs/engineering-rules/self-hosted-docker-deploy.md`.
 - [ ] Verify health and deployed commit.

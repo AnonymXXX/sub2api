@@ -124,5 +124,6 @@ After APIPod is connected, run at least 48 hours of observation before changing 
 
 - Implemented: routing audit table/API/UI, privacy precheck metadata, local Plus default model whitelist, Plus default concurrency `2`, and deployment branch/runbook.
 - Implemented: high-confidence rule precheck redirects obvious secret-bearing OpenAI Responses requests to trusted Plus.
-- Not yet implemented/configured: APIPod upstream account, APIPod quota config, API-key/user-level routing policy, `yk-plus` dedicated pool policy, and full trusted `gpt-5.5` AI privacy reviewer.
-- Current live backend previously had only the `openai` group and local OpenAI OAuth Plus accounts; APIPod had not been configured.
+- Configured in live backend: APIPod Code upstream account is connected as account `24`, bound to the `openai` group, marked `routing_pool=relay-apipod`, and populated with current upstream model mapping.
+- Partially supported by configuration: APIPod participates in ordinary OpenAI Responses scheduling and can be preferred by priority, but the advanced scheduler uses top-K weighted selection, so it does not provide strict "APIPod first, Plus only as fallback" behavior.
+- Not yet implemented: strict pool-order routing policy, APIPod quota snapshot/threshold behavior, API-key/user-level routing policy, `yk-plus` dedicated pool policy, and full trusted `gpt-5.5` AI privacy reviewer.

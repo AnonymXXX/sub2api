@@ -32,10 +32,16 @@ Source requirement: `docs/product-specs/codex-hybrid-routing-policy.md`.
 - Added local Plus default model whitelist and Plus default concurrency `2`.
 - Added self-hosted deployment branch/runbook notes.
 - Captured the current Codex hybrid routing product policy and cost/quota assumptions.
+- Committed and pushed product/exec-plan documentation to `origin/anonym/custom` at `54914743`.
+- Synced `/opt/sub2api-build` on `racknerd-us` to `54914743`; live containers remained healthy and were not rebuilt or restarted for the docs-only update.
+- Configured APIPod Code in the live backend as OpenAI API key account `24`, bound to group `openai` (`6`), with `routing_pool=relay-apipod`, priority `0`, concurrency `8`, and package quota metadata only.
+- Synced APIPod model mapping from its upstream `/v1/models`; current mapped models include `gpt-5.5`, `codex-auto-review`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.2`, `gpt-5.3-codex`, `gpt-5.3-codex-spark`, and `gpt-image-2`.
+- Verified Redis scheduler snapshots for `6:openai:single` and `6:openai:forced` include APIPod account `24`.
+- Verified high-confidence secret-bearing Responses requests are redirected to `trusted-plus` by rule precheck before scheduling.
 
 ### Pending
 
-- Configure APIPod Code as an external relay account/package in the live backend.
+- Implement a strict pool-order routing policy: ordinary traffic should prefer `relay-apipod` first, then fall back to Plus only for quota, health, capacity, or explicit policy reasons.
 - Add APIPod daily/weekly/monthly quota snapshots and threshold behavior.
 - Add API-key/user-level routing policy so cc-switch can expose one provider while Sub2API schedules internally.
 - Add `yk-plus` dedicated pool policy for `yangkai`.
@@ -51,15 +57,30 @@ Source requirement: `docs/product-specs/codex-hybrid-routing-policy.md`.
 ### Validation And Deployment Status
 
 - Current documented validation commands: `go test ./internal/service ./internal/repository ./internal/handler/admin` and `npm run typecheck`.
-- Last deployment status must be checked from the deployment runbook or live server before resuming operations.
+- Latest source checkout status, reviewed on 2026-06-29: local `anonym/custom`, `origin/anonym/custom`, and server `/opt/sub2api-build` all point to `54914743`.
+- Latest live service status, reviewed on 2026-06-29: `sub2api`, `sub2api-postgres`, and `sub2api-redis` were healthy; `/health` returned `{"status":"ok"}`.
+- The currently running application image was not rebuilt from `54914743` because that commit only updated documentation.
+- APIPod validation on 2026-06-29:
+  - A direct upstream model-list check succeeded with `8` models.
+  - A single ordinary short Responses request selected `trusted-plus` account `21`, showing strict APIPod default routing is not guaranteed by current advanced scheduling.
+  - Six ordinary short Responses probes selected APIPod account `24` for three successful requests, selected Plus account `19` for one successful request, and selected a Plus account with `codex_cli_only` enabled for two local curl requests that returned `403`.
+  - A fake secret-bearing test request triggered `privacy_redirect` with `rule_sensitive:env_secret_assignment,openai_api_key`; it did not select APIPod.
+
+### Configuration Findings
+
+- Current configuration can connect APIPod and make it eligible for normal OpenAI Responses traffic.
+- Current configuration can keep obvious secret-bearing traffic away from APIPod through the existing privacy precheck pool filter.
+- With `openai_advanced_scheduler_enabled=true`, current configuration cannot express "always use `relay-apipod` first, then Plus as fallback". The advanced scheduler uses top-K scoring plus weighted selection, so higher-priority APIPod is preferred probabilistically rather than strictly.
+- A temporary no-code option is to set `openai_advanced_scheduler_enabled=false`, which returns selection to priority plus least-recently-used behavior. That should make account `24` win ordinary routing because its priority is `0`, while privacy precheck still constrains sensitive requests to `trusted-plus`. The tradeoff is losing the advanced scheduler's load/queue/error/TTFT scoring for OpenAI traffic.
 
 ### Resume Next
 
-1. Check `git status --short` and confirm these docs are committed or intentionally pending.
-2. Verify the live backend branch and deployed image/container.
-3. Configure APIPod as a relay account without committing secrets.
-4. Implement quota snapshot capture and user/group routing if missing in code.
-5. Run validation commands, deploy, then observe routing logs for 48 hours.
+1. Decide whether to temporarily disable `openai_advanced_scheduler_enabled` for strict APIPod-first priority routing, or leave it enabled until a proper pool-order routing policy is implemented.
+2. Implement API-key/user-level routing policy and strict pool-order fallback (`relay-apipod` -> `yk-plus` or `plus-backup` according to user policy).
+3. Implement APIPod quota snapshot capture and threshold behavior.
+4. Add `yk-plus` dedicated pool policy for `yangkai`.
+5. Add full trusted `gpt-5.5` AI privacy reviewer only if rule precheck evidence shows it is needed.
+6. Run validation commands, deploy code changes if any, then observe routing logs for 48 hours.
 
 ## Privacy Boundary
 

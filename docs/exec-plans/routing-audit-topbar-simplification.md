@@ -30,6 +30,13 @@
 
 - [x] Commit feature branch `anonym/routing-audit-topbar` (`a6d79fa4`).
 - [x] Merge into deployment branch `anonym/custom`.
-- [ ] Push `anonym/custom`.
-- [ ] Deploy from `anonym/custom` using `docs/engineering-rules/self-hosted-docker-deploy.md`.
-- [ ] Verify health and deployed commit.
+- [x] Push `anonym/custom` (`d1b821b3`).
+- [x] Deploy from `anonym/custom` using `docs/engineering-rules/self-hosted-docker-deploy.md`.
+- [x] Verify health and deployed commit (`d1b821b3`).
+
+## Deployment Notes
+
+- Server build checkout `/opt/sub2api-build` synced to `d1b821b3`.
+- Pre-deploy PostgreSQL backup: `/opt/sub2api/backups/pre-deploy-20260629025901.sql.gz`.
+- Rebuilt local image `sub2api-local:codex-default-models` and recreated only the `sub2api` application container.
+- Verification: `/health` returned `{"status":"ok"}`, `sub2api` health was `healthy`, `docker exec sub2api /app/sub2api --version` reported commit `d1b821b3`, `public.routing_audit_logs` existed, and unauthenticated `/api/v1/admin/routing-audit/logs` returned `401`.

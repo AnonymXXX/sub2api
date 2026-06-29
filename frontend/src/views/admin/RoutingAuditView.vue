@@ -1,61 +1,6 @@
 <template>
   <AppLayout>
     <div class="space-y-5">
-      <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-        <div>
-          <h1 class="text-2xl font-semibold text-gray-900 dark:text-white">{{ t('admin.routingAudit.title') }}</h1>
-          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.routingAudit.description') }}</p>
-        </div>
-        <button class="btn btn-secondary" :disabled="loading" @click="refresh">
-          {{ loading ? '刷新中' : '刷新' }}
-        </button>
-      </div>
-
-      <div class="card p-4">
-        <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
-          <label class="space-y-1">
-            <span class="text-xs font-medium text-gray-600 dark:text-gray-300">开始日期</span>
-            <input v-model="filters.start_date" type="date" class="input" />
-          </label>
-          <label class="space-y-1">
-            <span class="text-xs font-medium text-gray-600 dark:text-gray-300">结束日期</span>
-            <input v-model="filters.end_date" type="date" class="input" />
-          </label>
-          <label class="space-y-1">
-            <span class="text-xs font-medium text-gray-600 dark:text-gray-300">用户 ID</span>
-            <input v-model.number="filters.user_id" type="number" min="1" class="input" placeholder="全部" />
-          </label>
-          <label class="space-y-1">
-            <span class="text-xs font-medium text-gray-600 dark:text-gray-300">API Key ID</span>
-            <input v-model.number="filters.api_key_id" type="number" min="1" class="input" placeholder="全部" />
-          </label>
-          <label class="space-y-1">
-            <span class="text-xs font-medium text-gray-600 dark:text-gray-300">账号 ID</span>
-            <input v-model.number="filters.account_id" type="number" min="1" class="input" placeholder="全部" />
-          </label>
-          <label class="space-y-1">
-            <span class="text-xs font-medium text-gray-600 dark:text-gray-300">模型</span>
-            <input v-model.trim="filters.model" type="text" class="input" placeholder="全部" />
-          </label>
-          <label class="space-y-1">
-            <span class="text-xs font-medium text-gray-600 dark:text-gray-300">分流池</span>
-            <input v-model.trim="filters.selected_pool" type="text" class="input" placeholder="relay-apipod / trusted-plus" />
-          </label>
-          <label class="space-y-1">
-            <span class="text-xs font-medium text-gray-600 dark:text-gray-300">决策原因</span>
-            <input v-model.trim="filters.decision_reason" type="text" class="input" placeholder="scheduler_load_balance" />
-          </label>
-          <label class="space-y-1">
-            <span class="text-xs font-medium text-gray-600 dark:text-gray-300">策略版本</span>
-            <input v-model.trim="filters.routing_policy_version" type="text" class="input" placeholder="routing-audit-v1" />
-          </label>
-          <div class="flex items-end gap-2 xl:col-span-3">
-            <button class="btn btn-primary" @click="applyFilters">查询</button>
-            <button class="btn btn-ghost" @click="resetFilters">重置</button>
-          </div>
-        </div>
-      </div>
-
       <div class="grid grid-cols-2 gap-3 xl:grid-cols-6">
         <div v-for="item in summaryCards" :key="item.label" class="card p-4">
           <div class="flex items-center justify-between gap-3">
@@ -64,6 +9,17 @@
           </div>
           <p class="mt-2 text-xl font-semibold text-gray-900 dark:text-white">{{ item.value }}</p>
           <p v-if="item.hint" class="mt-1 truncate text-[11px] text-gray-400 dark:text-gray-500">{{ item.hint }}</p>
+        </div>
+      </div>
+
+      <div class="card p-4">
+        <div class="flex flex-wrap items-center gap-3">
+          <span class="text-sm font-medium text-gray-700 dark:text-gray-300">时间范围:</span>
+          <DateRangePicker
+            v-model:start-date="filters.start_date"
+            v-model:end-date="filters.end_date"
+            @change="onDateRangeChange"
+          />
         </div>
       </div>
 
@@ -193,7 +149,6 @@
 
 <script setup lang="ts">
 import { computed, defineComponent, h, onMounted, reactive, ref } from 'vue'
-import { useI18n } from 'vue-i18n'
 import {
   ArcElement,
   BarElement,
@@ -206,6 +161,7 @@ import {
 import type { ChartData, ChartOptions } from 'chart.js'
 import { Bar, Doughnut } from 'vue-chartjs'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import { adminAPI } from '@/api/admin'
 import type { PoolSnapshot, RoutingAuditDimensionStat, RoutingAuditLog, RoutingAuditQueryParams, RoutingAuditSummary } from '@/api/admin'
@@ -226,7 +182,12 @@ type SummaryCard = {
   dotClass: string
 }
 
-const { t } = useI18n()
+type RoutingAuditDashboardParams = RoutingAuditQueryParams & {
+  start_date: string
+  end_date: string
+  sort_by: string
+  sort_order: 'asc' | 'desc'
+}
 
 const columns = ['时间', '用户/API Key', '模型', '分流池', '账号', '原因', '改道', '状态', 'Tokens', '费用', '耗时']
 const loading = ref(false)
@@ -234,7 +195,7 @@ const logs = ref<RoutingAuditLog[]>([])
 const summary = ref<RoutingAuditSummary | null>(null)
 const pagination = reactive({ page: 1, page_size: 20, total: 0 })
 
-const filters = reactive<RoutingAuditQueryParams>({
+const filters = reactive<RoutingAuditDashboardParams>({
   start_date: formatDateInput(daysAgo(2)),
   end_date: formatDateInput(new Date()),
   sort_by: 'created_at',
@@ -471,7 +432,10 @@ async function loadData() {
 
 function buildParams(): RoutingAuditQueryParams {
   const params: RoutingAuditQueryParams = {
-    ...filters,
+    start_date: filters.start_date,
+    end_date: filters.end_date,
+    sort_by: filters.sort_by,
+    sort_order: filters.sort_order,
     page: pagination.page,
     page_size: pagination.page_size
   }
@@ -484,31 +448,11 @@ function buildParams(): RoutingAuditQueryParams {
   return params
 }
 
-function applyFilters() {
+function onDateRangeChange(range: { startDate: string; endDate: string; preset: string | null }) {
+  filters.start_date = range.startDate
+  filters.end_date = range.endDate
   pagination.page = 1
   void loadData()
-}
-
-function refresh() {
-  void loadData()
-}
-
-function resetFilters() {
-  Object.assign(filters, {
-    start_date: formatDateInput(daysAgo(2)),
-    end_date: formatDateInput(new Date()),
-    user_id: undefined,
-    api_key_id: undefined,
-    account_id: undefined,
-    group_id: undefined,
-    model: '',
-    selected_pool: '',
-    decision_reason: '',
-    routing_policy_version: '',
-    sort_by: 'created_at',
-    sort_order: 'desc'
-  })
-  applyFilters()
 }
 
 function onPageChange(page: number) {

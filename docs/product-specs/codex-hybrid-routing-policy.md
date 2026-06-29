@@ -107,7 +107,7 @@ They should store reviewable metadata:
 - Plus pool snapshot at decision time
 - APIPod quota snapshot at decision time
 
-The admin routing audit page should make chart-based review the primary workflow. It should visualize request success, redirect composition, pool share, decision-reason share, token/cost concentration, latency, and latest pool/quota pressure from aggregate metadata only. Tables remain available for exact values and request-level drilldown, but operators should be able to judge routing health from the chart panels first without exposing prompt text or secrets.
+The admin routing audit page should make chart-based review the primary workflow. It should visualize request success, redirect composition, pool share, decision-reason share, token/cost concentration, latency, and latest pool/quota pressure from aggregate metadata only. Tables remain available for exact values and request-level drilldown, but operators should be able to judge routing health from the chart panels first without exposing prompt text or secrets. The page top should be compact: no duplicate in-page title, subtitle, manual refresh button, or broad dimension filter form. The primary controls are summary metric cards followed by a time-range selector; deeper filtering should not compete with the dashboard-first review flow.
 
 APIPod quota snapshots should include daily/weekly/monthly limit, used, remaining, used percent, quota source, and whether warning/degrade/disable thresholds were active.
 

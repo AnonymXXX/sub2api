@@ -30,6 +30,7 @@ Use placeholders in documentation and scripts. The current production shape is:
 - build checkout: `/opt/sub2api-build`
 - local app image: `sub2api-local:codex-default-models`
 - compose override: runtime directory `docker-compose.override.yml`
+- build swap: `/swapfile-sub2api-build` (`4G`, persistent via `/etc/fstab`)
 
 The runtime directory owns `.env`, persistent app data, PostgreSQL data, Redis data, and backups. The build checkout is disposable source code for building the image.
 
@@ -55,6 +56,20 @@ docker exec sub2api-postgres sh -lc 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U 
 ls -lh "/opt/sub2api/backups/pre-deploy-${ts}.sql.gz"
 ```
 
+Ensure build swap before image build:
+
+```bash
+if ! swapon --show=NAME | grep -qx /swapfile-sub2api-build; then
+  if [ ! -f /swapfile-sub2api-build ]; then
+    fallocate -l 4G /swapfile-sub2api-build || dd if=/dev/zero of=/swapfile-sub2api-build bs=1M count=4096
+    chmod 600 /swapfile-sub2api-build
+    mkswap /swapfile-sub2api-build
+  fi
+  swapon /swapfile-sub2api-build
+fi
+swapon --show=NAME,SIZE,USED
+```
+
 Build image:
 
 ```bash
@@ -65,19 +80,7 @@ docker build \
   -t sub2api-local:codex-default-models .
 ```
 
-If the server is memory constrained and Go compilation is killed, temporarily add swap for the build and remove it after deployment:
-
-```bash
-fallocate -l 4G /swapfile-sub2api-build || dd if=/dev/zero of=/swapfile-sub2api-build bs=1M count=4096
-chmod 600 /swapfile-sub2api-build
-mkswap /swapfile-sub2api-build
-swapon /swapfile-sub2api-build
-
-# rerun docker build here
-
-swapoff /swapfile-sub2api-build
-rm -f /swapfile-sub2api-build
-```
+Do not wait for Go compilation to be killed before adding swap. This RackNerd host is memory constrained for Docker builds, so ensure `/swapfile-sub2api-build` is enabled before every image build. Keep the file persistent unless disk pressure requires removal.
 
 Recreate app container only:
 

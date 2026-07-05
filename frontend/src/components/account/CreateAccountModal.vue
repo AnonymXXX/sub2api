@@ -3437,7 +3437,11 @@ const step = ref(1)
 const submitting = ref(false)
 const accountCategory = ref<'oauth-based' | 'apikey' | 'bedrock' | 'service_account'>('oauth-based') // UI selection for account category
 const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-token'
-const apiKeyBaseUrl = ref('https://api.anthropic.com')
+const DEFAULT_ACCOUNT_NAME = 'GPT-Plus'
+const DEFAULT_ACCOUNT_PLATFORM: AccountPlatform = 'openai'
+const DEFAULT_ACCOUNT_CONCURRENCY = 2
+
+const apiKeyBaseUrl = ref('https://api.openai.com')
 const apiKeyValue = ref('')
 
 const syncPreviewCredentials = computed(() => {
@@ -3497,7 +3501,7 @@ const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
-const codexCLIOnlyEnabled = ref(false)
+const codexCLIOnlyEnabled = ref(true)
 const codexCLIOnlyAppServerEnabled = ref(false)
 const anthropicPassthroughEnabled = ref(false)
 const webSearchEmulationMode = ref('default')
@@ -3631,8 +3635,6 @@ const mixedChannelWarningAction = ref<(() => Promise<void>) | null>(null)
 const antigravityMixedChannelConfirmed = ref(false)
 const showAdvancedOAuth = ref(false)
 const showGeminiHelpDialog = ref(false)
-const DEFAULT_ACCOUNT_CONCURRENCY = 5
-
 // Quota control state (Anthropic OAuth/SetupToken only)
 const windowCostEnabled = ref(false)
 const windowCostLimit = ref<number | null>(null)
@@ -3762,9 +3764,9 @@ const tempUnschedPresets = computed(() => [
 ])
 
 const form = reactive({
-  name: '',
+  name: DEFAULT_ACCOUNT_NAME,
   notes: '',
-  platform: 'anthropic' as AccountPlatform,
+  platform: DEFAULT_ACCOUNT_PLATFORM as AccountPlatform,
   type: 'oauth' as AccountType, // Will be 'oauth', 'setup-token', or 'apikey'
   credentials: {} as Record<string, unknown>,
   proxy_id: null as number | null,
@@ -4318,9 +4320,9 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
 // Methods
 const resetForm = () => {
   step.value = 1
-  form.name = ''
+  form.name = DEFAULT_ACCOUNT_NAME
   form.notes = ''
-  form.platform = 'anthropic'
+  form.platform = DEFAULT_ACCOUNT_PLATFORM
   form.type = 'oauth'
   form.credentials = {}
   form.proxy_id = null
@@ -4332,7 +4334,7 @@ const resetForm = () => {
   form.expires_at = null
   accountCategory.value = 'oauth-based'
   addMethod.value = 'oauth'
-  apiKeyBaseUrl.value = 'https://api.anthropic.com'
+  apiKeyBaseUrl.value = 'https://api.openai.com'
   apiKeyValue.value = ''
   editQuotaLimit.value = null
   editQuotaDailyLimit.value = null
@@ -4367,7 +4369,7 @@ const resetForm = () => {
   openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
   openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
-  codexCLIOnlyEnabled.value = false
+  codexCLIOnlyEnabled.value = true
   codexCLIOnlyAppServerEnabled.value = false
   anthropicPassthroughEnabled.value = false
   webSearchEmulationMode.value = 'default'

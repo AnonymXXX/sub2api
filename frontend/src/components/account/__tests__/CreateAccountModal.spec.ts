@@ -259,6 +259,22 @@ function mountModal(show = false) {
 }
 
 describe('CreateAccountModal', () => {
+  it('打开添加账号弹窗时默认使用 GPT-Plus OpenAI 配置', async () => {
+    const wrapper = mountModal()
+
+    await wrapper.setProps({ show: true })
+    await nextTick()
+
+    expect((wrapper.get('[data-tour="account-form-name"]').element as HTMLInputElement).value).toBe('GPT-Plus')
+    expect(wrapper.get('[data-testid="account-platform-openai"]').classes()).toContain('text-green-600')
+    expect((wrapper.get('[data-testid="account-concurrency"]').element as HTMLInputElement).value).toBe('2')
+    expect(wrapper.get('[data-testid="group-selector-value"]').text()).toBe('6')
+    expect(wrapper.get('[data-testid="model-whitelist-value"]').text()).toBe(
+      'gpt-5.5,codex-auto-review,gpt-5.4,gpt-5.4-mini'
+    )
+    expect(wrapper.get('[data-testid="openai-codex-cli-only-toggle"]').classes()).toContain('bg-primary-600')
+  })
+
   it('切换到 OpenAI 时默认选择 Codex 相关模型', async () => {
     const wrapper = mountModal()
 
@@ -279,12 +295,13 @@ describe('CreateAccountModal', () => {
     await wrapper.setProps({ show: true })
     await nextTick()
 
-    expect((wrapper.get('[data-testid="account-concurrency"]').element as HTMLInputElement).value).toBe('5')
+    expect((wrapper.get('[data-testid="account-concurrency"]').element as HTMLInputElement).value).toBe('2')
 
     await wrapper.get('[data-testid="account-platform-openai"]').trigger('click')
     await nextTick()
 
     expect(wrapper.get('[data-testid="group-selector-value"]').text()).toBe('6')
+    expect((wrapper.get('[data-testid="account-concurrency"]').element as HTMLInputElement).value).toBe('2')
     expect(wrapper.get('[data-testid="openai-codex-cli-only-toggle"]').classes()).toContain('bg-primary-600')
   })
 })

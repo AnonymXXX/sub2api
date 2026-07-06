@@ -112,6 +112,7 @@ describe('ImportDataModal', () => {
       proxy_reused: 0,
       proxy_failed: 0,
       account_created: 1,
+      account_updated: 0,
       account_failed: 0
     })
 

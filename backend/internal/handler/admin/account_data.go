@@ -78,6 +78,7 @@ type DataImportResult struct {
 	ProxyReused    int               `json:"proxy_reused"`
 	ProxyFailed    int               `json:"proxy_failed"`
 	AccountCreated int               `json:"account_created"`
+	AccountUpdated int               `json:"account_updated"`
 	AccountFailed  int               `json:"account_failed"`
 	Errors         []DataImportError `json:"errors,omitempty"`
 }
@@ -390,6 +391,12 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 	// 收集需要异步设置隐私的 Antigravity OAuth 账号
 	var privacyAccounts []*service.Account
 
+	existingAccounts, err := h.listAccountsFiltered(ctx, "", "", "", "", 0, "", "created_at", "desc")
+	if err != nil {
+		return result, err
+	}
+	accountEmailIndex := buildImportAccountEmailIndex(existingAccounts)
+
 	for i := range dataPayload.Accounts {
 		item := dataPayload.Accounts[i]
 		if req.Concurrency != nil {
@@ -398,6 +405,7 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 		if req.Priority != nil {
 			item.Priority = *req.Priority
 		}
+		enrichCredentialsFromIDToken(&item)
 		if err := validateDataAccount(item); err != nil {
 			result.AccountFailed++
 			result.Errors = append(result.Errors, DataImportError{
@@ -424,7 +432,60 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			}
 		}
 
-		enrichCredentialsFromIDToken(&item)
+		if existing, ambiguous := accountEmailIndex.Find(item); ambiguous {
+			result.AccountFailed++
+			result.Errors = append(result.Errors, DataImportError{
+				Kind:    "account",
+				Name:    item.Name,
+				Message: fmt.Sprintf("ambiguous existing account email: %s", normalizedImportAccountEmail(item.Credentials, item.Extra)),
+			})
+			continue
+		} else if existing != nil {
+			concurrency := item.Concurrency
+			priority := item.Priority
+			updateProxyID := proxyID
+			if item.ProxyKey == nil || strings.TrimSpace(*item.ProxyKey) == "" {
+				clearProxyID := int64(0)
+				updateProxyID = &clearProxyID
+			}
+			groupIDs := append([]int64(nil), req.GroupIDs...)
+			updated, updateErr := h.adminService.UpdateAccount(ctx, existing.ID, &service.UpdateAccountInput{
+				Name:               item.Name,
+				Notes:              item.Notes,
+				Type:               item.Type,
+				Credentials:        item.Credentials,
+				Extra:              item.Extra,
+				ProxyID:            updateProxyID,
+				Concurrency:        &concurrency,
+				Priority:           &priority,
+				RateMultiplier:     item.RateMultiplier,
+				GroupIDs:           &groupIDs,
+				ExpiresAt:          item.ExpiresAt,
+				AutoPauseOnExpired: item.AutoPauseOnExpired,
+			})
+			if updateErr != nil {
+				result.AccountFailed++
+				result.Errors = append(result.Errors, DataImportError{
+					Kind:    "account",
+					Name:    item.Name,
+					Message: updateErr.Error(),
+				})
+				continue
+			}
+			if updated != nil && updated.Platform == service.PlatformAntigravity && updated.Type == service.AccountTypeOAuth {
+				privacyAccounts = append(privacyAccounts, updated)
+			}
+			accountEmailIndex.Add(service.Account{
+				ID:          existing.ID,
+				Name:        item.Name,
+				Platform:    item.Platform,
+				Type:        item.Type,
+				Credentials: item.Credentials,
+				Extra:       item.Extra,
+			})
+			result.AccountUpdated++
+			continue
+		}
 
 		accountInput := &service.CreateAccountInput{
 			Name:                 item.Name,
@@ -457,6 +518,14 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 		if created.Platform == service.PlatformAntigravity && created.Type == service.AccountTypeOAuth {
 			privacyAccounts = append(privacyAccounts, created)
 		}
+		accountEmailIndex.Add(service.Account{
+			ID:          created.ID,
+			Name:        item.Name,
+			Platform:    item.Platform,
+			Type:        item.Type,
+			Credentials: item.Credentials,
+			Extra:       item.Extra,
+		})
 		result.AccountCreated++
 	}
 
@@ -478,6 +547,91 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 	}
 
 	return result, nil
+}
+
+type importAccountEmailIndex struct {
+	accountsByKey map[string][]service.Account
+}
+
+func buildImportAccountEmailIndex(accounts []service.Account) *importAccountEmailIndex {
+	index := &importAccountEmailIndex{accountsByKey: map[string][]service.Account{}}
+	for i := range accounts {
+		index.Add(accounts[i])
+	}
+	return index
+}
+
+func (i *importAccountEmailIndex) Add(account service.Account) {
+	if i == nil {
+		return
+	}
+	if i.accountsByKey == nil {
+		i.accountsByKey = map[string][]service.Account{}
+	}
+	key := importAccountEmailKey(account.Platform, account.Type, account.Credentials, account.Extra)
+	if key == "" {
+		return
+	}
+	for idx := range i.accountsByKey[key] {
+		if i.accountsByKey[key][idx].ID == account.ID {
+			i.accountsByKey[key][idx] = account
+			return
+		}
+	}
+	i.accountsByKey[key] = append(i.accountsByKey[key], account)
+}
+
+func (i *importAccountEmailIndex) Find(item DataAccount) (*service.Account, bool) {
+	if i == nil {
+		return nil, false
+	}
+	key := importAccountEmailKey(item.Platform, item.Type, item.Credentials, item.Extra)
+	if key == "" {
+		return nil, false
+	}
+	accounts := i.accountsByKey[key]
+	if len(accounts) == 0 {
+		return nil, false
+	}
+	if len(accounts) > 1 {
+		return nil, true
+	}
+	return &accounts[0], false
+}
+
+func importAccountEmailKey(platform, accountType string, credentials, extra map[string]any) string {
+	email := normalizedImportAccountEmail(credentials, extra)
+	if email == "" {
+		return ""
+	}
+	normalizedPlatform := strings.ToLower(strings.TrimSpace(platform))
+	normalizedType := strings.ToLower(strings.TrimSpace(accountType))
+	if normalizedPlatform == "" || normalizedType == "" {
+		return ""
+	}
+	return normalizedPlatform + ":" + normalizedType + ":" + email
+}
+
+func normalizedImportAccountEmail(credentials, extra map[string]any) string {
+	if email := normalizedStringMapValue(credentials, "email"); email != "" {
+		return email
+	}
+	return normalizedStringMapValue(extra, "email")
+}
+
+func normalizedStringMapValue(values map[string]any, key string) string {
+	if values == nil {
+		return ""
+	}
+	raw, ok := values[key]
+	if !ok {
+		return ""
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(value))
 }
 
 func (h *AccountHandler) listAllProxies(ctx context.Context) ([]service.Proxy, error) {

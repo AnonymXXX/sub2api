@@ -314,3 +314,195 @@ func TestImportDataAppliesImportDefaults(t *testing.T) {
 	require.Equal(t, []int64{22}, adminSvc.createdAccounts[0].GroupIDs)
 	require.True(t, adminSvc.createdAccounts[0].SkipDefaultGroupBind)
 }
+
+func TestImportDataUpdatesExistingAccountByEmail(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	adminSvc.accounts = []service.Account{
+		{
+			ID:       41,
+			Name:     "old-name",
+			Platform: service.PlatformOpenAI,
+			Type:     service.AccountTypeOAuth,
+			Credentials: map[string]any{
+				"email":              "Owner@Example.com",
+				"chatgpt_account_id": "old-account-id",
+			},
+			Extra:       map[string]any{"note": "old"},
+			Concurrency: 1,
+			Priority:    50,
+			Status:      service.StatusActive,
+		},
+	}
+
+	dataPayload := map[string]any{
+		"data": map[string]any{
+			"type":    dataType,
+			"version": dataVersion,
+			"proxies": []map[string]any{},
+			"accounts": []map[string]any{
+				{
+					"name":     "GPT-Plus",
+					"platform": service.PlatformOpenAI,
+					"type":     service.AccountTypeOAuth,
+					"credentials": map[string]any{
+						"email":              "owner@example.com",
+						"chatgpt_account_id": "new-account-id",
+						"access_token":       "at-new",
+					},
+					"extra":       map[string]any{"source": "import"},
+					"concurrency": 3,
+					"priority":    50,
+				},
+			},
+		},
+		"skip_default_group_bind": true,
+		"concurrency":             5,
+		"priority":                1,
+		"group_ids":               []int64{22},
+	}
+
+	body, _ := json.Marshal(dataPayload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	require.Len(t, adminSvc.createdAccounts, 0)
+	require.Equal(t, []int64{41}, adminSvc.updatedAccountIDs)
+	require.Len(t, adminSvc.updatedAccounts, 1)
+	update := adminSvc.updatedAccounts[0]
+	require.Equal(t, "GPT-Plus", update.Name)
+	require.Equal(t, service.AccountTypeOAuth, update.Type)
+	require.Equal(t, "owner@example.com", update.Credentials["email"])
+	require.Equal(t, "new-account-id", update.Credentials["chatgpt_account_id"])
+	require.Equal(t, "import", update.Extra["source"])
+	require.NotNil(t, update.Concurrency)
+	require.Equal(t, 5, *update.Concurrency)
+	require.NotNil(t, update.Priority)
+	require.Equal(t, 1, *update.Priority)
+	require.NotNil(t, update.GroupIDs)
+	require.Equal(t, []int64{22}, *update.GroupIDs)
+
+	var resp struct {
+		Code int              `json:"code"`
+		Data DataImportResult `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 0, resp.Code)
+	require.Equal(t, 0, resp.Data.AccountCreated)
+	require.Equal(t, 1, resp.Data.AccountUpdated)
+	require.Equal(t, 0, resp.Data.AccountFailed)
+}
+
+func TestImportDataDoesNotMatchExistingAccountBySharedAccountID(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	adminSvc.accounts = []service.Account{
+		{
+			ID:       48,
+			Name:     "John Jones",
+			Platform: service.PlatformOpenAI,
+			Type:     service.AccountTypeOAuth,
+			Credentials: map[string]any{
+				"email":              "first@example.com",
+				"chatgpt_account_id": "shared-account-id",
+			},
+			Status: service.StatusActive,
+		},
+	}
+
+	dataPayload := map[string]any{
+		"data": map[string]any{
+			"type":    dataType,
+			"version": dataVersion,
+			"proxies": []map[string]any{},
+			"accounts": []map[string]any{
+				{
+					"name":     "John Johnson",
+					"platform": service.PlatformOpenAI,
+					"type":     service.AccountTypeOAuth,
+					"credentials": map[string]any{
+						"email":              "second@example.com",
+						"chatgpt_account_id": "shared-account-id",
+						"access_token":       "at-second",
+					},
+					"concurrency": 5,
+					"priority":    1,
+				},
+			},
+		},
+	}
+
+	body, _ := json.Marshal(dataPayload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	require.Len(t, adminSvc.updatedAccounts, 0)
+	require.Len(t, adminSvc.createdAccounts, 1)
+	require.Equal(t, "second@example.com", adminSvc.createdAccounts[0].Credentials["email"])
+}
+
+func TestImportDataFailsOnAmbiguousExistingEmail(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	adminSvc.accounts = []service.Account{
+		{
+			ID:          41,
+			Name:        "old-a",
+			Platform:    service.PlatformOpenAI,
+			Type:        service.AccountTypeOAuth,
+			Credentials: map[string]any{"email": "same@example.com"},
+			Status:      service.StatusActive,
+		},
+		{
+			ID:          42,
+			Name:        "old-b",
+			Platform:    service.PlatformOpenAI,
+			Type:        service.AccountTypeOAuth,
+			Credentials: map[string]any{"email": "same@example.com"},
+			Status:      service.StatusActive,
+		},
+	}
+
+	dataPayload := map[string]any{
+		"data": map[string]any{
+			"type":    dataType,
+			"version": dataVersion,
+			"proxies": []map[string]any{},
+			"accounts": []map[string]any{
+				{
+					"name":        "GPT-Plus",
+					"platform":    service.PlatformOpenAI,
+					"type":        service.AccountTypeOAuth,
+					"credentials": map[string]any{"email": "same@example.com", "access_token": "at-new"},
+					"concurrency": 5,
+					"priority":    1,
+				},
+			},
+		},
+	}
+
+	body, _ := json.Marshal(dataPayload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	require.Len(t, adminSvc.updatedAccounts, 0)
+	require.Len(t, adminSvc.createdAccounts, 0)
+
+	var resp struct {
+		Code int              `json:"code"`
+		Data DataImportResult `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 0, resp.Code)
+	require.Equal(t, 0, resp.Data.AccountCreated)
+	require.Equal(t, 0, resp.Data.AccountUpdated)
+	require.Equal(t, 1, resp.Data.AccountFailed)
+	require.Len(t, resp.Data.Errors, 1)
+	require.Contains(t, resp.Data.Errors[0].Message, "ambiguous existing account email")
+}

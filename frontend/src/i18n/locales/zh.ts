@@ -3144,9 +3144,9 @@ export default {
       dataImportParseFailed: '数据解析失败',
       dataImportFailed: '数据导入失败',
       dataImportResult: '导入结果',
-      dataImportResultSummary: '代理创建 {proxy_created}，复用 {proxy_reused}，失败 {proxy_failed}；账号创建 {account_created}，失败 {account_failed}',
+      dataImportResultSummary: '代理创建 {proxy_created}，复用 {proxy_reused}，失败 {proxy_failed}；账号创建 {account_created}，更新 {account_updated}，失败 {account_failed}',
       dataImportErrors: '失败详情',
-      dataImportSuccess: '导入完成：账号 {account_created}，失败 {account_failed}',
+      dataImportSuccess: '导入完成：账号创建 {account_created}，更新 {account_updated}，失败 {account_failed}',
       dataImportCompletedWithErrors: '导入完成但有错误：账号失败 {account_failed}，代理失败 {proxy_failed}',
       syncFromCrsTitle: '从 CRS 同步账号',
       syncFromCrsDesc:

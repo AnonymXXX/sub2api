@@ -13,6 +13,9 @@ Current custom branch:
 - Rebuild only the application image and recreate only the application container unless the change explicitly requires database or Redis maintenance.
 - Keep PostgreSQL and Redis containers and their data volumes running during ordinary application updates.
 - Verify the exact commit built into the image before considering deployment complete.
+- After a successful deployment and health check, prune Docker build cache and dangling images to keep the RackNerd disk healthy.
+- Do not run `docker system prune --volumes` during routine deployment cleanup.
+- Do not delete `/opt/sub2api/backups`, PostgreSQL/Redis volumes, or tagged rollback images as part of routine deployment cleanup.
 
 ## Standard flow
 
@@ -21,6 +24,8 @@ Current custom branch:
 3. Build the local application image with the same image tag used by the compose override.
 4. Recreate the application container without recreating dependencies.
 5. Verify health, commit, migrations, and key routes.
+6. Prune Docker build cache and dangling images.
+7. Re-check disk usage and container health.
 
 ## Server layout
 
@@ -115,6 +120,19 @@ curl -sS -o /tmp/route-check.txt -w '%{http_code}\n' \
 ```
 
 The health route should return `200`.
+
+Post-deploy cleanup:
+
+```bash
+docker builder prune -af
+docker image prune -f
+docker system df
+df -hT /
+docker ps --format '{{.Names}}\t{{.Image}}\t{{.Status}}' | grep -E 'sub2api|postgres|redis'
+curl -sS -o /tmp/sub2api-health.txt -w '%{http_code}\n' http://127.0.0.1:8080/health
+```
+
+This cleanup intentionally removes only reusable Docker build cache and dangling images. It must not remove volumes, backups, or tagged images that may be useful for rollback.
 
 ## Rollback
 

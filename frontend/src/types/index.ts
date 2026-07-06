@@ -1171,6 +1171,14 @@ export interface AdminDataImportResult {
   errors?: AdminDataImportError[]
 }
 
+export interface AdminDataImportRequest {
+  data: AdminDataPayload
+  skip_default_group_bind?: boolean
+  concurrency?: number
+  priority?: number
+  group_ids?: number[]
+}
+
 export interface CodexSessionImportRequest {
   content?: string
   contents?: string[]

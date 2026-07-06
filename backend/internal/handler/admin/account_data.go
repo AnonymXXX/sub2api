@@ -68,6 +68,9 @@ type DataAccount struct {
 type DataImportRequest struct {
 	Data                 DataPayload `json:"data"`
 	SkipDefaultGroupBind *bool       `json:"skip_default_group_bind"`
+	Concurrency          *int        `json:"concurrency"`
+	Priority             *int        `json:"priority"`
+	GroupIDs             []int64     `json:"group_ids"`
 }
 
 type DataImportResult struct {
@@ -209,6 +212,20 @@ func (h *AccountHandler) ImportData(c *gin.Context) {
 	if err := validateDataHeader(req.Data); err != nil {
 		response.BadRequest(c, err.Error())
 		return
+	}
+	if req.Concurrency != nil && *req.Concurrency < 0 {
+		response.BadRequest(c, "concurrency must be >= 0")
+		return
+	}
+	if req.Priority != nil && *req.Priority < 0 {
+		response.BadRequest(c, "priority must be >= 0")
+		return
+	}
+	for _, groupID := range req.GroupIDs {
+		if groupID <= 0 {
+			response.BadRequest(c, "group_ids must contain positive ids")
+			return
+		}
 	}
 
 	executeAdminIdempotentJSON(c, "admin.accounts.import_data", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
@@ -375,6 +392,12 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 
 	for i := range dataPayload.Accounts {
 		item := dataPayload.Accounts[i]
+		if req.Concurrency != nil {
+			item.Concurrency = *req.Concurrency
+		}
+		if req.Priority != nil {
+			item.Priority = *req.Priority
+		}
 		if err := validateDataAccount(item); err != nil {
 			result.AccountFailed++
 			result.Errors = append(result.Errors, DataImportError{
@@ -414,7 +437,7 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			Concurrency:          item.Concurrency,
 			Priority:             item.Priority,
 			RateMultiplier:       item.RateMultiplier,
-			GroupIDs:             nil,
+			GroupIDs:             req.GroupIDs,
 			ExpiresAt:            item.ExpiresAt,
 			AutoPauseOnExpired:   item.AutoPauseOnExpired,
 			SkipDefaultGroupBind: skipDefaultGroupBind,

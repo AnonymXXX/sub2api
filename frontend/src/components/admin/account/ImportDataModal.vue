@@ -40,6 +40,52 @@
         />
       </div>
 
+      <div class="grid gap-3 sm:grid-cols-2">
+        <div>
+          <label for="data-import-concurrency" class="input-label">
+            {{ t('admin.accounts.dataImportConcurrency') }}
+          </label>
+          <input
+            id="data-import-concurrency"
+            v-model.number="concurrency"
+            data-test="data-import-concurrency"
+            type="number"
+            min="0"
+            class="input"
+          />
+        </div>
+        <div>
+          <label for="data-import-priority" class="input-label">
+            {{ t('admin.accounts.dataImportPriority') }}
+          </label>
+          <input
+            id="data-import-priority"
+            v-model.number="priority"
+            data-test="data-import-priority"
+            type="number"
+            min="0"
+            class="input"
+          />
+        </div>
+      </div>
+
+      <div>
+        <label for="data-import-group" class="input-label">
+          {{ t('admin.accounts.dataImportGroup') }}
+        </label>
+        <select
+          id="data-import-group"
+          v-model="selectedGroupId"
+          data-test="data-import-group"
+          class="input"
+        >
+          <option value="">{{ t('admin.accounts.dataImportNoGroup') }}</option>
+          <option v-for="group in openAIGroups" :key="group.id" :value="String(group.id)">
+            {{ group.name }}
+          </option>
+        </select>
+      </div>
+
       <div
         v-if="result"
         class="space-y-2 rounded-xl border border-gray-200 p-4 dark:border-dark-700"
@@ -90,10 +136,12 @@ import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
-import type { AdminDataImportResult } from '@/types'
+import type { AdminDataImportResult, AdminGroup } from '@/types'
 
 interface Props {
   show: boolean
+  groups?: AdminGroup[]
+  currentGroupId?: number | null
 }
 
 interface Emits {
@@ -110,11 +158,26 @@ const appStore = useAppStore()
 const importing = ref(false)
 const file = ref<File | null>(null)
 const result = ref<AdminDataImportResult | null>(null)
+const concurrency = ref(5)
+const priority = ref(1)
+const selectedGroupId = ref('')
 
 const fileInput = ref<HTMLInputElement | null>(null)
 const fileName = computed(() => file.value?.name || '')
+const openAIGroups = computed(() =>
+  (props.groups || []).filter(group => group.platform === 'openai' && group.status === 'active')
+)
 
 const errorItems = computed(() => result.value?.errors || [])
+
+const resolveDefaultGroupId = () => {
+  const groups = openAIGroups.value
+  const currentGroup = groups.find(group => group.id === props.currentGroupId)
+  if (currentGroup) return String(currentGroup.id)
+  const defaultGroup = groups.find(group => group.name === 'openai-default')
+  if (defaultGroup) return String(defaultGroup.id)
+  return groups[0] ? String(groups[0].id) : ''
+}
 
 watch(
   () => props.show,
@@ -122,11 +185,15 @@ watch(
     if (open) {
       file.value = null
       result.value = null
+      concurrency.value = 5
+      priority.value = 1
+      selectedGroupId.value = resolveDefaultGroupId()
       if (fileInput.value) {
         fileInput.value.value = ''
       }
     }
-  }
+  },
+  { immediate: true }
 )
 
 const openFilePicker = () => {
@@ -174,7 +241,10 @@ const handleImport = async () => {
 
     const res = await adminAPI.accounts.importData({
       data: dataPayload,
-      skip_default_group_bind: true
+      skip_default_group_bind: true,
+      concurrency: Number(concurrency.value) || 0,
+      priority: Number(priority.value) || 0,
+      group_ids: selectedGroupId.value ? [Number(selectedGroupId.value)] : []
     })
 
     result.value = res

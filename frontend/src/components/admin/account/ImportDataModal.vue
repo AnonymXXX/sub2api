@@ -40,20 +40,6 @@
         />
       </div>
 
-      <div>
-        <label for="account-data-json-input" class="input-label">{{ t('admin.accounts.dataImportJsonText') }}</label>
-        <textarea
-          id="account-data-json-input"
-          v-model="jsonText"
-          class="input min-h-40 font-mono text-xs"
-          spellcheck="false"
-          :placeholder="t('admin.accounts.dataImportJsonTextPlaceholder')"
-        ></textarea>
-        <div class="mt-1 text-xs text-gray-500 dark:text-dark-400">
-          {{ t('admin.accounts.dataImportJsonTextHint') }}
-        </div>
-      </div>
-
       <div
         v-if="result"
         class="space-y-2 rounded-xl border border-gray-200 p-4 dark:border-dark-700"
@@ -123,7 +109,6 @@ const appStore = useAppStore()
 
 const importing = ref(false)
 const file = ref<File | null>(null)
-const jsonText = ref('')
 const result = ref<AdminDataImportResult | null>(null)
 
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -136,7 +121,6 @@ watch(
   (open) => {
     if (open) {
       file.value = null
-      jsonText.value = ''
       result.value = null
       if (fileInput.value) {
         fileInput.value.value = ''
@@ -178,14 +162,14 @@ const readFileAsText = async (sourceFile: File): Promise<string> => {
 }
 
 const handleImport = async () => {
-  if (!file.value && !jsonText.value.trim()) {
-    appStore.showError(t('admin.accounts.dataImportSelectSource'))
+  if (!file.value) {
+    appStore.showError(t('admin.accounts.dataImportSelectFile'))
     return
   }
 
   importing.value = true
   try {
-    const text = file.value ? await readFileAsText(file.value) : jsonText.value
+    const text = await readFileAsText(file.value)
     const dataPayload = JSON.parse(text)
 
     const res = await adminAPI.accounts.importData({

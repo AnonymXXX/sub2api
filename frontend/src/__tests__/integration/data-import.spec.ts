@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { mount } from '@vue/test-utils'
 import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
-import { adminAPI } from '@/api/admin'
 
 const showError = vi.fn()
 const showSuccess = vi.fn()
@@ -31,10 +30,9 @@ describe('ImportDataModal', () => {
   beforeEach(() => {
     showError.mockReset()
     showSuccess.mockReset()
-    vi.mocked(adminAPI.accounts.importData).mockReset()
   })
 
-  it('未选择文件且未粘贴 JSON 时提示错误', async () => {
+  it('未选择文件时提示错误', async () => {
     const wrapper = mount(ImportDataModal, {
       props: { show: true },
       global: {
@@ -45,7 +43,7 @@ describe('ImportDataModal', () => {
     })
 
     await wrapper.find('form').trigger('submit')
-    expect(showError).toHaveBeenCalledWith('admin.accounts.dataImportSelectSource')
+    expect(showError).toHaveBeenCalledWith('admin.accounts.dataImportSelectFile')
   })
 
   it('无效 JSON 时提示解析失败', async () => {
@@ -72,49 +70,5 @@ describe('ImportDataModal', () => {
     await Promise.resolve()
 
     expect(showError).toHaveBeenCalledWith('admin.accounts.dataImportParseFailed')
-  })
-
-  it('可直接粘贴 JSON 并导入', async () => {
-    vi.mocked(adminAPI.accounts.importData).mockResolvedValue({
-      proxy_created: 0,
-      proxy_reused: 0,
-      proxy_failed: 0,
-      account_created: 1,
-      account_failed: 0
-    })
-    const payload = {
-      type: 'sub2api-data',
-      version: 1,
-      exported_at: '2026-07-06T00:00:00Z',
-      proxies: [],
-      accounts: [
-        {
-          name: 'GPT-Plus',
-          platform: 'openai',
-          type: 'oauth',
-          credentials: { access_token: 'test-access-token' },
-          concurrency: 2,
-          priority: 1
-        }
-      ]
-    }
-    const wrapper = mount(ImportDataModal, {
-      props: { show: true },
-      global: {
-        stubs: {
-          BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' }
-        }
-      }
-    })
-
-    await wrapper.find('textarea').setValue(JSON.stringify(payload))
-    await wrapper.find('form').trigger('submit')
-    await flushPromises()
-
-    expect(adminAPI.accounts.importData).toHaveBeenCalledWith({
-      data: payload,
-      skip_default_group_bind: true
-    })
-    expect(showSuccess).toHaveBeenCalledWith('admin.accounts.dataImportSuccess')
   })
 })

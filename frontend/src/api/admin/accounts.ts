@@ -562,81 +562,6 @@ export async function syncFromCrs(params: {
   return data
 }
 
-export interface AccountManagerPreviewAccount {
-  account_key: string
-  account_id?: number
-  name: string
-  platform: string
-  type: string
-}
-
-export interface PreviewFromAccountManagerResult {
-  new_accounts: AccountManagerPreviewAccount[]
-  existing_accounts: AccountManagerPreviewAccount[]
-  errors?: Array<{
-    kind: string
-    name?: string
-    message?: string
-  }>
-}
-
-export async function previewFromAccountManager(params: {
-  base_url: string
-  username: string
-  password: string
-}): Promise<PreviewFromAccountManagerResult> {
-  const { data } = await apiClient.post<PreviewFromAccountManagerResult>('/admin/accounts/sync/account-manager/preview', params)
-  return data
-}
-
-export async function syncFromAccountManager(params: {
-  base_url: string
-  username: string
-  password: string
-  selected_account_keys?: string[]
-}): Promise<{
-  created: number
-  updated: number
-  skipped: number
-  failed: number
-  items: Array<{
-    account_key?: string
-    account_id?: number
-    name?: string
-    platform?: string
-    type?: string
-    action: string
-    message?: string
-  }>
-  errors?: Array<{
-    kind: string
-    name?: string
-    message?: string
-  }>
-}> {
-  const { data } = await apiClient.post<{
-    created: number
-    updated: number
-    skipped: number
-    failed: number
-    items: Array<{
-      account_key?: string
-      account_id?: number
-      name?: string
-      platform?: string
-      type?: string
-      action: string
-      message?: string
-    }>
-    errors?: Array<{
-      kind: string
-      name?: string
-      message?: string
-    }>
-  }>('/admin/accounts/sync/account-manager', params)
-  return data
-}
-
 export async function exportData(options?: {
   ids?: number[]
   filters?: {
@@ -890,8 +815,6 @@ export const accountsAPI = {
   bulkUpdate,
   previewFromCrs,
   syncFromCrs,
-  previewFromAccountManager,
-  syncFromAccountManager,
   exportData,
   importData,
   importCodexSession,

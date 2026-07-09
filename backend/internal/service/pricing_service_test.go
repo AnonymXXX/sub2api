@@ -113,6 +113,20 @@ func TestGetModelPricing_OpenAICompactAliasUsesStaticFallback(t *testing.T) {
 	require.InDelta(t, 1.5e-5, got.OutputCostPerToken, 1e-12)
 }
 
+func TestGetModelPricing_GPT56UsesStaticFallbackWhenRemoteMissing(t *testing.T) {
+	svc := &PricingService{
+		pricingData: map[string]*LiteLLMModelPricing{
+			"gpt-5.1-codex": {InputCostPerToken: 1.25e-6},
+		},
+	}
+
+	got := svc.GetModelPricing("gpt-5.6-sol")
+	require.NotNil(t, got)
+	require.InDelta(t, 2.5e-6, got.InputCostPerToken, 1e-12)
+	require.InDelta(t, 1.5e-5, got.OutputCostPerToken, 1e-12)
+	require.InDelta(t, 2.5e-7, got.CacheReadInputTokenCost, 1e-12)
+}
+
 func TestDefaultPricingIncludesCodexAutoReview(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "resources", "model-pricing", "model_prices_and_context_window.json"))
 	require.NoError(t, err)
@@ -127,6 +141,25 @@ func TestDefaultPricingIncludesCodexAutoReview(t *testing.T) {
 	require.InDelta(t, 5e-6, got.InputCostPerToken, 1e-12)
 	require.InDelta(t, 3e-5, got.OutputCostPerToken, 1e-12)
 	require.InDelta(t, 5e-7, got.CacheReadInputTokenCost, 1e-12)
+}
+
+func TestDefaultPricingIncludesGPT56Family(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "resources", "model-pricing", "model_prices_and_context_window.json"))
+	require.NoError(t, err)
+
+	svc := &PricingService{}
+	pricingData, err := svc.parsePricingData(data)
+	require.NoError(t, err)
+	svc.pricingData = pricingData
+
+	for _, model := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
+		got := svc.GetModelPricing(model)
+		require.NotNil(t, got, model)
+		require.InDelta(t, 5e-6, got.InputCostPerToken, 1e-12, model)
+		require.InDelta(t, 3e-5, got.OutputCostPerToken, 1e-12, model)
+		require.InDelta(t, 5e-7, got.CacheReadInputTokenCost, 1e-12, model)
+		require.True(t, got.SupportsServiceTier, model)
+	}
 }
 
 func TestGetModelPricing_Gpt54MiniUsesDedicatedStaticFallbackWhenRemoteMissing(t *testing.T) {

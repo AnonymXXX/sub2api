@@ -16,6 +16,9 @@ describe('useModelWhitelist', () => {
   it('openai 模型列表包含 GPT-5.4 官方快照', () => {
     const models = getModelsByPlatform('openai')
 
+    expect(models).toContain('gpt-5.6-sol')
+    expect(models).toContain('gpt-5.6-terra')
+    expect(models).toContain('gpt-5.6-luna')
     expect(models).toContain('gpt-5.4')
     expect(models).toContain('gpt-5.4-mini')
     expect(models).toContain('gpt-5.4-2026-03-05')
@@ -35,6 +38,9 @@ describe('useModelWhitelist', () => {
 
   it('新增 OpenAI 账号默认只选择 Codex 相关模型', () => {
     expect(getDefaultAccountWhitelistModels('openai')).toEqual([
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
       'gpt-5.5',
       'codex-auto-review',
       'gpt-5.4',

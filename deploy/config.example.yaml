@@ -339,6 +339,15 @@ gateway:
     fallback_error_threshold: 2
     fallback_window_seconds: 60
     fallback_ttl_seconds: 600
+  # Conservative OpenAI Responses plain-text tool-output guard (HTTP only).
+  # Keep off by default; use observe before enforce and scope by API key ID.
+  openai_tool_output_guard:
+    mode: "off" # off | observe | enforce
+    api_key_ids: []
+    require_codex_client: true
+    min_chars: 32000
+    head_chars: 12000
+    tail_chars: 12000
   # HTTP upstream connection pool settings (HTTP/2 + multi-proxy scenario defaults)
   # HTTP 上游连接池配置（HTTP/2 + 多代理场景默认值）
   # Max idle connections across all hosts

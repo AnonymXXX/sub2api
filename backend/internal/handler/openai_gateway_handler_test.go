@@ -480,6 +480,44 @@ func TestOpenAIModelMappedBodyCache(t *testing.T) {
 	require.Same(t, &first[0], &second[0])
 }
 
+func TestOpenAIToolOutputGuardForwardBody(t *testing.T) {
+	original := strings.Repeat("tool output ", 200)
+	body, err := json.Marshal(map[string]any{
+		"model": "gpt-5",
+		"input": []any{map[string]any{
+			"type":    "function_call_output",
+			"call_id": "call_1",
+			"output":  original,
+		}},
+	})
+	require.NoError(t, err)
+
+	h := &OpenAIGatewayHandler{cfg: &config.Config{Gateway: config.GatewayConfig{
+		OpenAIToolOutputGuard: config.GatewayOpenAIToolOutputGuardConfig{
+			Mode:               "enforce",
+			APIKeyIDs:          []int64{1},
+			RequireCodexClient: true,
+			MinChars:           100,
+			HeadChars:          20,
+			TailChars:          20,
+		},
+	}}}
+
+	forward, stats, err := h.openAIToolOutputGuardForwardBody(body, 1, "codex_cli_rs/0.144.1", "codex_cli_rs")
+	require.NoError(t, err)
+	require.True(t, stats.Changed)
+	require.Contains(t, gjson.GetBytes(forward, "input.0.output").String(), "Sub2API tool output guard")
+	require.Equal(t, original, gjson.GetBytes(body, "input.0.output").String())
+
+	// Non-allowlisted API keys and non-Codex clients must receive the original bytes.
+	forward, _, err = h.openAIToolOutputGuardForwardBody(body, 2, "codex_cli_rs/0.144.1", "codex_cli_rs")
+	require.NoError(t, err)
+	require.Equal(t, body, forward)
+	forward, _, err = h.openAIToolOutputGuardForwardBody(body, 1, "curl/8.0", "")
+	require.NoError(t, err)
+	require.Equal(t, body, forward)
+}
+
 func TestOpenAIResponses_MissingDependencies_ReturnsServiceUnavailable(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

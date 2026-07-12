@@ -727,6 +727,8 @@ type GatewayConfig struct {
 	OpenAIScheduler GatewayOpenAISchedulerConfig `mapstructure:"openai_scheduler"`
 	// OpenAIHTTP2: OpenAI HTTP 上游协议策略（默认启用 HTTP/2，可按代理能力回退 HTTP/1.1）
 	OpenAIHTTP2 GatewayOpenAIHTTP2Config `mapstructure:"openai_http2"`
+	// OpenAIToolOutputGuard: OpenAI Responses 纯文本工具输出保护（默认关闭）。
+	OpenAIToolOutputGuard GatewayOpenAIToolOutputGuardConfig `mapstructure:"openai_tool_output_guard"`
 	// ImageConcurrency: 图片生成独立并发限制配置（默认关闭）
 	ImageConcurrency ImageConcurrencyConfig `mapstructure:"image_concurrency"`
 
@@ -803,6 +805,17 @@ type GatewayConfig struct {
 	// UserMessageQueue: 用户消息串行队列配置
 	// 对 role:"user" 的真实用户消息实施账号级串行化 + RPM 自适应延迟
 	UserMessageQueue UserMessageQueueConfig `mapstructure:"user_message_queue"`
+}
+
+// GatewayOpenAIToolOutputGuardConfig controls conservative, API-key-scoped
+// truncation of abnormally large plain-text tool outputs.
+type GatewayOpenAIToolOutputGuardConfig struct {
+	Mode               string  `mapstructure:"mode"`
+	APIKeyIDs          []int64 `mapstructure:"api_key_ids"`
+	RequireCodexClient bool    `mapstructure:"require_codex_client"`
+	MinChars           int     `mapstructure:"min_chars"`
+	HeadChars          int     `mapstructure:"head_chars"`
+	TailChars          int     `mapstructure:"tail_chars"`
 }
 
 // GatewayOpenAIHTTP2Config OpenAI HTTP 上游协议配置。
@@ -1397,6 +1410,19 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 
 	// 默认值
 	setDefaults()
+	if raw, ok := os.LookupEnv("GATEWAY_OPENAI_TOOL_OUTPUT_GUARD_API_KEY_IDS"); ok {
+		parts := make([]string, 0)
+		for _, part := range strings.Split(raw, ",") {
+			if trimmed := strings.TrimSpace(part); trimmed != "" {
+				parts = append(parts, trimmed)
+			}
+		}
+		if len(parts) == 0 {
+			viper.Set("gateway.openai_tool_output_guard.api_key_ids", []int64{})
+		} else {
+			viper.Set("gateway.openai_tool_output_guard.api_key_ids", strings.Join(parts, ","))
+		}
+	}
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
@@ -1890,6 +1916,12 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_http2.fallback_error_threshold", 2)
 	viper.SetDefault("gateway.openai_http2.fallback_window_seconds", 60)
 	viper.SetDefault("gateway.openai_http2.fallback_ttl_seconds", 600)
+	viper.SetDefault("gateway.openai_tool_output_guard.mode", "off")
+	viper.SetDefault("gateway.openai_tool_output_guard.api_key_ids", []int64{})
+	viper.SetDefault("gateway.openai_tool_output_guard.require_codex_client", true)
+	viper.SetDefault("gateway.openai_tool_output_guard.min_chars", 32000)
+	viper.SetDefault("gateway.openai_tool_output_guard.head_chars", 12000)
+	viper.SetDefault("gateway.openai_tool_output_guard.tail_chars", 12000)
 	viper.SetDefault("gateway.image_concurrency.enabled", false)
 	viper.SetDefault("gateway.image_concurrency.max_concurrent_requests", 0)
 	viper.SetDefault("gateway.image_concurrency.overflow_mode", ImageConcurrencyOverflowModeReject)
@@ -2649,6 +2681,26 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.OpenAIWS.StickyPreviousResponseTTLSeconds < 0 {
 		return fmt.Errorf("gateway.openai_ws.sticky_previous_response_ttl_seconds must be non-negative")
+	}
+	guard := c.Gateway.OpenAIToolOutputGuard
+	switch strings.ToLower(strings.TrimSpace(guard.Mode)) {
+	case "off", "observe", "enforce":
+	default:
+		return fmt.Errorf("gateway.openai_tool_output_guard.mode must be one of off|observe|enforce")
+	}
+	for _, apiKeyID := range guard.APIKeyIDs {
+		if apiKeyID <= 0 {
+			return fmt.Errorf("gateway.openai_tool_output_guard.api_key_ids must contain only positive IDs")
+		}
+	}
+	if guard.MinChars <= 0 {
+		return fmt.Errorf("gateway.openai_tool_output_guard.min_chars must be positive")
+	}
+	if guard.HeadChars < 0 || guard.TailChars < 0 {
+		return fmt.Errorf("gateway.openai_tool_output_guard head_chars and tail_chars must be non-negative")
+	}
+	if guard.HeadChars+guard.TailChars >= guard.MinChars {
+		return fmt.Errorf("gateway.openai_tool_output_guard head_chars + tail_chars must be less than min_chars")
 	}
 	if c.Gateway.OpenAIHTTP2.FallbackErrorThreshold < 0 {
 		return fmt.Errorf("gateway.openai_http2.fallback_error_threshold must be non-negative")

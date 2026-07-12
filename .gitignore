@@ -133,8 +133,11 @@ docs/*
 !docs/ADMIN_PAYMENT_INTEGRATION_API.md
 !docs/engineering-rules/
 !docs/engineering-rules/*.md
+!docs/product-specs/
+!docs/product-specs/*.md
 !docs/exec-plans/
 !docs/exec-plans/rollback-before-apipod.md
+!docs/exec-plans/openai-tool-output-guard.md
 !docs/legal/
 !docs/legal/*.md
 .serena/

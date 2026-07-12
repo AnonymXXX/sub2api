@@ -16,6 +16,7 @@ import (
 	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	openaiutil "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -70,6 +71,26 @@ func newOpenAIModelMappedBodyCache(body []byte, replace openAIModelBodyReplaceFu
 		replacedBodies[mappedModel] = replacedBody
 		return replacedBody
 	}
+}
+
+func (h *OpenAIGatewayHandler) openAIToolOutputGuardForwardBody(body []byte, apiKeyID int64, userAgent, originator string) ([]byte, service.OpenAIToolOutputGuardStats, error) {
+	if h == nil || h.cfg == nil {
+		return body, service.OpenAIToolOutputGuardStats{}, nil
+	}
+	configured := h.cfg.Gateway.OpenAIToolOutputGuard
+	policy := service.OpenAIToolOutputGuardConfig{
+		Mode:               configured.Mode,
+		APIKeyIDs:          configured.APIKeyIDs,
+		RequireCodexClient: configured.RequireCodexClient,
+		MinChars:           configured.MinChars,
+		HeadChars:          configured.HeadChars,
+		TailChars:          configured.TailChars,
+	}
+	isCodexClient := openaiutil.IsCodexOfficialClientByHeaders(userAgent, originator)
+	if !policy.Allows(apiKeyID, isCodexClient) {
+		return body, service.OpenAIToolOutputGuardStats{}, nil
+	}
+	return service.ApplyOpenAIToolOutputGuard(body, policy)
 }
 
 func usageRecordContext(parent context.Context, base context.Context) context.Context {
@@ -273,14 +294,40 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}
 	}
 
-	// 解析渠道级模型映射
-	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
-	forwardBody := openAIModelMappedBody(body, channelMapping.Mapped, channelMapping.MappedModel, h.gatewayService.ReplaceModelInBody)
-
 	// 提前校验 function_call_output 是否具备可关联上下文，避免上游 400。
 	if !h.validateFunctionCallOutputRequest(c, body, reqLog) {
 		return
 	}
+
+	guardedBody, guardStats, guardErr := h.openAIToolOutputGuardForwardBody(
+		body,
+		apiKey.ID,
+		c.GetHeader("User-Agent"),
+		c.GetHeader("originator"),
+	)
+	if guardErr != nil {
+		// Token reduction must never make the gateway unavailable.
+		reqLog.Warn("openai.tool_output_guard_failed", zap.Error(guardErr))
+		guardedBody = body
+	} else if guardStats.InspectedCount() > 0 {
+		reqLog.Info("openai.tool_output_guard_inspected",
+			zap.String("mode", strings.ToLower(strings.TrimSpace(h.cfg.Gateway.OpenAIToolOutputGuard.Mode))),
+			zap.Bool("changed", guardStats.Changed),
+			zap.Int("inspected_count", guardStats.InspectedCount()),
+			zap.Int("candidate_count", guardStats.CandidateCount),
+			zap.Int("transformed_count", guardStats.TransformedCount),
+			zap.Int("original_chars", guardStats.OriginalChars),
+			zap.Int("forwarded_chars", guardStats.ForwardedChars),
+			zap.Int("saved_chars", guardStats.SavedChars),
+			zap.Int("bypass_below_threshold", guardStats.BypassBelowThreshold),
+			zap.Int("bypass_non_string", guardStats.BypassNonString),
+			zap.Int("bypass_binary_like", guardStats.BypassBinaryLike),
+		)
+	}
+
+	// 解析渠道级模型映射；上游和所有重试复用同一份已保护请求体。
+	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
+	forwardBody := openAIModelMappedBody(guardedBody, channelMapping.Mapped, channelMapping.MappedModel, h.gatewayService.ReplaceModelInBody)
 
 	// 绑定错误透传服务，允许 service 层在非 failover 错误场景复用规则。
 	if h.errorPassthroughService != nil {

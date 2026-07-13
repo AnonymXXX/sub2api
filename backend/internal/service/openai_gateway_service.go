@@ -3583,7 +3583,11 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	if err != nil {
 		return nil, err
 	}
-	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
+	profile := HTTPUpstreamProfileOpenAI
+	if isOpenAIResponsesCompactPath(c) {
+		profile = HTTPUpstreamProfileOpenAICompact
+	}
+	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), profile))
 
 	// 透传客户端请求头（安全白名单）。
 	allowTimeoutHeaders := s.isOpenAIPassthroughTimeoutHeadersAllowed()
@@ -4354,7 +4358,11 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	if err != nil {
 		return nil, err
 	}
-	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
+	profile := HTTPUpstreamProfileOpenAI
+	if isOpenAIResponsesCompactPath(c) {
+		profile = HTTPUpstreamProfileOpenAICompact
+	}
+	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), profile))
 
 	// Set authentication header
 	req.Header.Set("authorization", "Bearer "+token)

@@ -13,6 +13,10 @@ Related requirement:
 - [x] Implement the 300-second default and per-client connection recovery.
 - [x] Update self-hosted deployment examples.
 - [x] Run focused and broad backend validation.
+- [x] Observe production behavior under the 300-second bound.
+- [ ] Add an independent 300-second compact transport profile.
+- [ ] Lower the ordinary OpenAI default to 120 seconds.
+- [ ] Validate, integrate, push, and deploy the split timeout policy.
 
 ## Validation
 
@@ -30,6 +34,7 @@ Related requirement:
 
 This task implements and validates the change locally. It does not push,
 deploy, edit the production environment, or restart the production service.
-Production currently sets `GATEWAY_OPENAI_RESPONSE_HEADER_TIMEOUT=0`, so rollout
-requires changing that value to `300` and recreating the application container
-after the code change is integrated.
+Production currently sets `GATEWAY_OPENAI_RESPONSE_HEADER_TIMEOUT=300`. The
+split-timeout rollout changes it to `120`, adds
+`GATEWAY_OPENAI_COMPACT_RESPONSE_HEADER_TIMEOUT=300`, and recreates only the
+application container after the code change is integrated.

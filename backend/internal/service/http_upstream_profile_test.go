@@ -19,3 +19,10 @@ func TestWithHTTPUpstreamProfile_OpenAI(t *testing.T) {
 		t.Fatalf("expected profile %q, got %q", HTTPUpstreamProfileOpenAI, profile)
 	}
 }
+
+func TestWithHTTPUpstreamProfile_OpenAICompact(t *testing.T) {
+	ctx := WithHTTPUpstreamProfile(context.TODO(), HTTPUpstreamProfileOpenAICompact)
+	if profile := HTTPUpstreamProfileFromContext(ctx); profile != HTTPUpstreamProfileOpenAICompact {
+		t.Fatalf("expected profile %q, got %q", HTTPUpstreamProfileOpenAICompact, profile)
+	}
+}

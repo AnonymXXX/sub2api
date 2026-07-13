@@ -204,7 +204,26 @@ func TestLoadDefaultOpenAIResponseHeaderTimeout(t *testing.T) {
 
 	cfg, err := Load()
 	require.NoError(t, err)
-	require.Equal(t, 300, cfg.Gateway.OpenAIResponseHeaderTimeout)
+	require.Equal(t, 120, cfg.Gateway.OpenAIResponseHeaderTimeout)
+	require.Equal(t, 300, cfg.Gateway.OpenAICompactResponseHeaderTimeout)
+}
+
+func TestLoadOpenAICompactResponseHeaderTimeoutFromEnv(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("GATEWAY_OPENAI_COMPACT_RESPONSE_HEADER_TIMEOUT", "900")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, 900, cfg.Gateway.OpenAICompactResponseHeaderTimeout)
+}
+
+func TestLoadOpenAICompactResponseHeaderTimeoutCanBeDisabled(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("GATEWAY_OPENAI_COMPACT_RESPONSE_HEADER_TIMEOUT", "0")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, 0, cfg.Gateway.OpenAICompactResponseHeaderTimeout)
 }
 
 func TestLoadOpenAIResponseHeaderTimeoutFromEnv(t *testing.T) {
@@ -1296,6 +1315,11 @@ func TestValidateConfigErrors(t *testing.T) {
 			name:    "gateway openai response header timeout",
 			mutate:  func(c *Config) { c.Gateway.OpenAIResponseHeaderTimeout = -1 },
 			wantErr: "gateway.openai_response_header_timeout",
+		},
+		{
+			name:    "gateway openai compact response header timeout",
+			mutate:  func(c *Config) { c.Gateway.OpenAICompactResponseHeaderTimeout = -1 },
+			wantErr: "gateway.openai_compact_response_header_timeout",
 		},
 		{
 			name:    "gateway max idle conns",

@@ -129,6 +129,43 @@ func (s *HTTPUpstreamSuite) TestOpenAIProfileCustomHeaderTimeout() {
 	require.Equal(s.T(), 1800*time.Second, transport.ResponseHeaderTimeout)
 }
 
+func (s *HTTPUpstreamSuite) TestOpenAICompactProfileUsesIndependentHeaderTimeoutAndClient() {
+	s.cfg.Gateway = config.GatewayConfig{
+		OpenAIResponseHeaderTimeout:        120,
+		OpenAICompactResponseHeaderTimeout: 300,
+		OpenAIHTTP2:                        config.GatewayOpenAIHTTP2Config{Enabled: true},
+	}
+	svc := s.newService()
+	ordinary, err := svc.getClientEntry("", 1, 1, service.HTTPUpstreamProfileOpenAI, false, false)
+	require.NoError(s.T(), err)
+	compact, err := svc.getClientEntry("", 1, 1, service.HTTPUpstreamProfileOpenAICompact, false, false)
+	require.NoError(s.T(), err)
+
+	require.NotSame(s.T(), ordinary, compact)
+	ordinaryTransport := ordinary.client.Transport.(*http.Transport)
+	compactTransport := compact.client.Transport.(*http.Transport)
+	require.Equal(s.T(), 120*time.Second, ordinaryTransport.ResponseHeaderTimeout)
+	require.Equal(s.T(), 300*time.Second, compactTransport.ResponseHeaderTimeout)
+
+	again, err := svc.getClientEntry("", 1, 1, service.HTTPUpstreamProfileOpenAI, false, false)
+	require.NoError(s.T(), err)
+	require.Same(s.T(), ordinary, again, "compact profile must not evict the ordinary OpenAI client")
+}
+
+func (s *HTTPUpstreamSuite) TestOpenAICompactProfileUsesIndependentClientWhenTimeoutsMatch() {
+	s.cfg.Gateway = config.GatewayConfig{
+		OpenAIResponseHeaderTimeout:        300,
+		OpenAICompactResponseHeaderTimeout: 300,
+		OpenAIHTTP2:                        config.GatewayOpenAIHTTP2Config{Enabled: true},
+	}
+	svc := s.newService()
+	ordinary, err := svc.getClientEntry("", 1, 1, service.HTTPUpstreamProfileOpenAI, false, false)
+	require.NoError(s.T(), err)
+	compact, err := svc.getClientEntry("", 1, 1, service.HTTPUpstreamProfileOpenAICompact, false, false)
+	require.NoError(s.T(), err)
+	require.NotSame(s.T(), ordinary, compact)
+}
+
 func (s *HTTPUpstreamSuite) TestTransportErrorClosesAffectedClientIdleConnections() {
 	s.cfg.Gateway = config.GatewayConfig{
 		OpenAIHTTP2: config.GatewayOpenAIHTTP2Config{Enabled: true},

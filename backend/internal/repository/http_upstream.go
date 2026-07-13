@@ -179,7 +179,7 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 	resp, err := entry.client.Do(req)
 	if err != nil {
 		s.recordOpenAIHTTP2Failure(profile, entry.protocolMode, entry.proxyKey, err)
-		if profile == service.HTTPUpstreamProfileOpenAI {
+		if isOpenAIUpstreamProfile(profile) {
 			s.invalidateClientEntry(entry)
 		}
 		// 请求失败，立即减少计数
@@ -253,7 +253,7 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 
 	resp, err := entry.client.Do(req)
 	if err != nil {
-		if upstreamProfile == service.HTTPUpstreamProfileOpenAI {
+		if isOpenAIUpstreamProfile(upstreamProfile) {
 			s.invalidateClientEntry(entry)
 		}
 		atomic.AddInt64(&entry.inFlight, -1)
@@ -288,7 +288,7 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 	settings := s.resolvePoolSettings(isolation, accountConcurrency)
 	settings = s.applyProfilePoolSettings(settings, upstreamProfile)
 	// TLS 指纹客户端使用独立的缓存键，加 "tls:" 前缀
-	cacheKey := "tls:" + buildCacheKey(isolation, proxyKey, accountID, upstreamProtocolModeDefault)
+	cacheKey := "tls:" + buildCacheKey(isolation, proxyKey, accountID, upstreamProtocolModeDefault) + profileCacheKeySuffix(upstreamProfile)
 	poolKey := buildPoolKey(settings, upstreamProtocolModeDefault) + ":tls"
 
 	now := time.Now()
@@ -448,7 +448,7 @@ func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, a
 	settings := s.resolvePoolSettings(isolation, accountConcurrency)
 	settings = s.applyProfilePoolSettings(settings, profile)
 	// 构建缓存键（根据隔离策略不同）
-	cacheKey := buildCacheKey(isolation, proxyKey, accountID, protocolMode)
+	cacheKey := buildCacheKey(isolation, proxyKey, accountID, protocolMode) + profileCacheKeySuffix(profile)
 	// 构建连接池配置键（用于检测配置变更）
 	poolKey := buildPoolKey(settings, protocolMode)
 
@@ -691,14 +691,32 @@ func (s *httpUpstreamService) resolvePoolSettings(isolation string, accountConcu
 }
 
 func (s *httpUpstreamService) applyProfilePoolSettings(settings poolSettings, profile service.HTTPUpstreamProfile) poolSettings {
-	if profile != service.HTTPUpstreamProfileOpenAI {
+	if !isOpenAIUpstreamProfile(profile) {
 		return settings
 	}
 	settings.responseHeaderTimeout = 0
-	if s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIResponseHeaderTimeout > 0 {
-		settings.responseHeaderTimeout = time.Duration(s.cfg.Gateway.OpenAIResponseHeaderTimeout) * time.Second
+	if s == nil || s.cfg == nil {
+		return settings
+	}
+	timeoutSeconds := s.cfg.Gateway.OpenAIResponseHeaderTimeout
+	if profile == service.HTTPUpstreamProfileOpenAICompact {
+		timeoutSeconds = s.cfg.Gateway.OpenAICompactResponseHeaderTimeout
+	}
+	if timeoutSeconds > 0 {
+		settings.responseHeaderTimeout = time.Duration(timeoutSeconds) * time.Second
 	}
 	return settings
+}
+
+func isOpenAIUpstreamProfile(profile service.HTTPUpstreamProfile) bool {
+	return profile == service.HTTPUpstreamProfileOpenAI || profile == service.HTTPUpstreamProfileOpenAICompact
+}
+
+func profileCacheKeySuffix(profile service.HTTPUpstreamProfile) string {
+	if profile == service.HTTPUpstreamProfileDefault {
+		return ""
+	}
+	return "|profile:" + string(profile)
 }
 
 // buildPoolKey 构建连接池配置键，用于检测连接池配置变更。
@@ -775,7 +793,7 @@ func (s *httpUpstreamService) resolveOpenAIHTTP2Settings() openAIHTTP2Settings {
 }
 
 func (s *httpUpstreamService) resolveProtocolMode(profile service.HTTPUpstreamProfile, proxyKey string, parsedProxy *url.URL) string {
-	if profile != service.HTTPUpstreamProfileOpenAI {
+	if !isOpenAIUpstreamProfile(profile) {
 		return upstreamProtocolModeDefault
 	}
 	settings := s.resolveOpenAIHTTP2Settings()
@@ -880,7 +898,7 @@ func isUpstreamTimeoutError(err error) bool {
 }
 
 func (s *httpUpstreamService) recordOpenAIHTTP2Failure(profile service.HTTPUpstreamProfile, protocolMode, proxyKey string, err error) {
-	if profile != service.HTTPUpstreamProfileOpenAI || protocolMode != upstreamProtocolModeOpenAIH2 {
+	if !isOpenAIUpstreamProfile(profile) || protocolMode != upstreamProtocolModeOpenAIH2 {
 		return
 	}
 	settings := s.resolveOpenAIHTTP2Settings()
@@ -900,7 +918,7 @@ func (s *httpUpstreamService) recordOpenAIHTTP2Failure(profile service.HTTPUpstr
 }
 
 func (s *httpUpstreamService) recordOpenAIHTTP2Success(profile service.HTTPUpstreamProfile, protocolMode, proxyKey string) {
-	if profile != service.HTTPUpstreamProfileOpenAI || protocolMode != upstreamProtocolModeOpenAIH2 {
+	if !isOpenAIUpstreamProfile(profile) || protocolMode != upstreamProtocolModeOpenAIH2 {
 		return
 	}
 	if !isHTTPProxyKey(proxyKey) {

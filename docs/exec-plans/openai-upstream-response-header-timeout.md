@@ -68,12 +68,16 @@ the rollout complete.
 - Verified `/health` returned HTTP 200 and the running binary reported commit
   `cc3abbe0`.
 - Observed production from the final container start at
-  `2026-07-13T13:28:29Z` through `2026-07-13T13:31:42Z`. During this short
-  window, 15 requests completed, including 11 `/v1/responses` requests. The
-  maximum completed latency was 34,296 ms; no 5xx response, response-header
-  timeout, failover switch, panic, fatal error, or migration error appeared.
-  No `/responses/compact` production request occurred in this window, so its
-  production evidence is limited to configuration verification and the
-  automated transport/configuration tests listed above.
+  `2026-07-13T13:28:29Z` through `2026-07-13T13:36:12Z`. Three ordinary
+  `/v1/responses` requests reached failover after approximately 120 seconds of
+  upstream response-header waiting. Each switched from an upstream 502 to a
+  different account and completed with client HTTP 200 at 142,621 ms,
+  128,658 ms, and 147,389 ms respectively. This confirms that the ordinary
+  120-second boundary interrupts the stalled upstream attempt and permits
+  recovery instead of leaving the client waiting indefinitely. No client 5xx,
+  panic, fatal error, or migration error appeared. No `/responses/compact`
+  production request occurred in this window, so its production evidence is
+  limited to configuration verification and the automated
+  transport/configuration tests listed above.
 - Pruned build cache after verification, reclaimed approximately 4.85 GB, and
   retained the rollback image and data volumes.

@@ -694,7 +694,7 @@ type GatewayConfig struct {
 	// 注意：这不影响流式数据传输，只控制等待响应头的时间
 	ResponseHeaderTimeout int `mapstructure:"response_header_timeout"`
 	// OpenAIResponseHeaderTimeout: OpenAI/Codex 上游等待响应头的超时时间（秒），0表示无超时
-	// OpenAI/Codex 请求可能在上游排队较久；默认不使用通用响应头超时截断。
+	// 默认 300 秒；使用独立配置，避免继承通用超时后无法单独调优。
 	OpenAIResponseHeaderTimeout int `mapstructure:"openai_response_header_timeout"`
 	// 请求体最大字节数，用于网关请求体大小限制
 	MaxBodySize int64 `mapstructure:"max_body_size"`
@@ -1850,7 +1850,7 @@ func setDefaults() {
 
 	// Gateway
 	viper.SetDefault("gateway.response_header_timeout", 600) // 600秒(10分钟)等待上游响应头，LLM高负载时可能排队较久
-	viper.SetDefault("gateway.openai_response_header_timeout", 0)
+	viper.SetDefault("gateway.openai_response_header_timeout", 300)
 	viper.SetDefault("gateway.log_upstream_error_body", true)
 	viper.SetDefault("gateway.log_upstream_error_body_max_bytes", 2048)
 	viper.SetDefault("gateway.inject_beta_for_apikey", false)

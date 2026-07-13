@@ -22,6 +22,18 @@ type HTTPUpstreamSuite struct {
 	cfg *config.Config // 测试用配置
 }
 
+type closeTrackingRoundTripper struct {
+	closeIdleCalls atomic.Int64
+}
+
+func (t *closeTrackingRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("timeout awaiting response headers")
+}
+
+func (t *closeTrackingRoundTripper) CloseIdleConnections() {
+	t.closeIdleCalls.Add(1)
+}
+
 // SetupTest 每个测试用例执行前的初始化
 // 创建空配置，各测试用例可按需覆盖
 func (s *HTTPUpstreamSuite) SetupTest() {
@@ -83,7 +95,7 @@ func (s *HTTPUpstreamSuite) TestGetOrCreateClient_InvalidURLReturnsError() {
 	require.Error(s.T(), err, "expected error for invalid proxy URL")
 }
 
-func (s *HTTPUpstreamSuite) TestOpenAIProfileDefaultsToHTTP2AndNoHeaderTimeout() {
+func (s *HTTPUpstreamSuite) TestOpenAIProfileExplicitZeroUsesHTTP2AndNoHeaderTimeout() {
 	s.cfg.Gateway = config.GatewayConfig{
 		ResponseHeaderTimeout: 600,
 		OpenAIHTTP2: config.GatewayOpenAIHTTP2Config{
@@ -115,6 +127,53 @@ func (s *HTTPUpstreamSuite) TestOpenAIProfileCustomHeaderTimeout() {
 	transport, ok := entry.client.Transport.(*http.Transport)
 	require.True(s.T(), ok, "expected *http.Transport")
 	require.Equal(s.T(), 1800*time.Second, transport.ResponseHeaderTimeout)
+}
+
+func (s *HTTPUpstreamSuite) TestTransportErrorClosesAffectedClientIdleConnections() {
+	s.cfg.Gateway = config.GatewayConfig{
+		OpenAIHTTP2: config.GatewayOpenAIHTTP2Config{Enabled: true},
+	}
+	svc := s.newService()
+	entry, err := svc.getClientEntry("", 42, 1, service.HTTPUpstreamProfileOpenAI, false, false)
+	require.NoError(s.T(), err)
+
+	transport := &closeTrackingRoundTripper{}
+	entry.client.Transport = transport
+	req, err := http.NewRequest(http.MethodPost, "https://example.com/responses", http.NoBody)
+	require.NoError(s.T(), err)
+	req = req.WithContext(service.WithHTTPUpstreamProfile(req.Context(), service.HTTPUpstreamProfileOpenAI))
+
+	_, err = svc.Do(req, "", 42, 1)
+	require.ErrorContains(s.T(), err, "timeout awaiting response headers")
+	require.Equal(s.T(), int64(1), transport.closeIdleCalls.Load())
+
+	replacement, err := svc.getClientEntry("", 42, 1, service.HTTPUpstreamProfileOpenAI, false, false)
+	require.NoError(s.T(), err)
+	require.NotSame(s.T(), entry, replacement, "the next request must use a fresh client entry")
+}
+
+func (s *HTTPUpstreamSuite) TestTLSTransportErrorReplacesAffectedOpenAIClient() {
+	s.cfg.Gateway = config.GatewayConfig{
+		OpenAIHTTP2: config.GatewayOpenAIHTTP2Config{Enabled: true},
+	}
+	svc := s.newService()
+	tlsProfile := &tlsfingerprint.Profile{Name: "test"}
+	entry, err := svc.getClientEntryWithTLS("", 42, 1, tlsProfile, service.HTTPUpstreamProfileOpenAI, false, false)
+	require.NoError(s.T(), err)
+
+	transport := &closeTrackingRoundTripper{}
+	entry.client.Transport = transport
+	req, err := http.NewRequest(http.MethodPost, "https://example.com/responses", http.NoBody)
+	require.NoError(s.T(), err)
+	req = req.WithContext(service.WithHTTPUpstreamProfile(req.Context(), service.HTTPUpstreamProfileOpenAI))
+
+	_, err = svc.DoWithTLS(req, "", 42, 1, tlsProfile)
+	require.ErrorContains(s.T(), err, "timeout awaiting response headers")
+	require.Equal(s.T(), int64(1), transport.closeIdleCalls.Load())
+
+	replacement, err := svc.getClientEntryWithTLS("", 42, 1, tlsProfile, service.HTTPUpstreamProfileOpenAI, false, false)
+	require.NoError(s.T(), err)
+	require.NotSame(s.T(), entry, replacement, "the next request must use a fresh TLS client entry")
 }
 
 func (s *HTTPUpstreamSuite) TestOpenAIProfileTLSFingerprintDoesNotInheritGenericHeaderTimeout() {

@@ -179,6 +179,9 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 	resp, err := entry.client.Do(req)
 	if err != nil {
 		s.recordOpenAIHTTP2Failure(profile, entry.protocolMode, entry.proxyKey, err)
+		if profile == service.HTTPUpstreamProfileOpenAI {
+			s.invalidateClientEntry(entry)
+		}
 		// 请求失败，立即减少计数
 		atomic.AddInt64(&entry.inFlight, -1)
 		atomic.StoreInt64(&entry.lastUsed, time.Now().UnixNano())
@@ -197,6 +200,22 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 	})
 
 	return resp, nil
+}
+
+// invalidateClientEntry removes an exact cached entry so the next request
+// creates a fresh transport. Active requests on the old transport may finish.
+func (s *httpUpstreamService) invalidateClientEntry(target *upstreamClientEntry) {
+	if s == nil || target == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, entry := range s.clients {
+		if entry == target {
+			s.removeClientLocked(key, entry)
+			return
+		}
+	}
 }
 
 // DoWithTLS 执行带 TLS 指纹伪装的 HTTP 请求
@@ -234,6 +253,9 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 
 	resp, err := entry.client.Do(req)
 	if err != nil {
+		if upstreamProfile == service.HTTPUpstreamProfileOpenAI {
+			s.invalidateClientEntry(entry)
+		}
 		atomic.AddInt64(&entry.inFlight, -1)
 		atomic.StoreInt64(&entry.lastUsed, time.Now().UnixNano())
 		slog.Debug("tls_fingerprint_request_failed", "account_id", accountID, "error", err)

@@ -18,7 +18,7 @@ Related requirement:
 - [x] Lower the ordinary OpenAI default to 120 seconds.
 - [x] Merge upstream `7d239d62` (`v0.1.153`) while preserving custom behavior.
 - [x] Run focused and release-level validation after the upstream merge.
-- [ ] Integrate into `anonym/custom`, push, deploy, and observe production.
+- [x] Integrate into `anonym/custom`, push, deploy, and observe production.
 
 ## Validation
 
@@ -48,3 +48,32 @@ rollout changes it to `120`, adds
 application container. PostgreSQL backup, rollback image tagging, commit/health
 verification, and post-deploy log observation remain required before marking
 the rollout complete.
+
+## Deployment Result
+
+- Pushed `anonym/custom` through commit `cc3abbe0` and deployed Sub2API
+  `0.1.153` from image `sub2api-local:gpt56-cache-billing-rc1` (image ID
+  `sha256:87ff2c47d56df213438ddc8f4040ce8e1e4649ebc063b2c16454543154d0d43c`).
+- Created database backup
+  `/opt/sub2api/backups/pre-deploy-20260713131814.sql.gz` and retained rollback
+  image `sub2api-local:rollback-20260713131814` before replacement.
+- Recreated only the `sub2api` service. PostgreSQL and Redis container IDs
+  remained unchanged and all three services were healthy after deployment.
+- Set and verified the running container environment values
+  `GATEWAY_OPENAI_RESPONSE_HEADER_TIMEOUT=120` and
+  `GATEWAY_OPENAI_COMPACT_RESPONSE_HEADER_TIMEOUT=300`. The production-owned
+  `/opt/sub2api/docker-compose.yml` initially lacked the new compact variable,
+  so its environment passthrough was added without replacing the rest of the
+  server-specific Compose configuration.
+- Verified `/health` returned HTTP 200 and the running binary reported commit
+  `cc3abbe0`.
+- Observed production from the final container start at
+  `2026-07-13T13:28:29Z` through `2026-07-13T13:31:42Z`. During this short
+  window, 15 requests completed, including 11 `/v1/responses` requests. The
+  maximum completed latency was 34,296 ms; no 5xx response, response-header
+  timeout, failover switch, panic, fatal error, or migration error appeared.
+  No `/responses/compact` production request occurred in this window, so its
+  production evidence is limited to configuration verification and the
+  automated transport/configuration tests listed above.
+- Pruned build cache after verification, reclaimed approximately 4.85 GB, and
+  retained the rollback image and data volumes.

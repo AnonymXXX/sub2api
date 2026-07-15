@@ -358,17 +358,18 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if dialer == nil {
 		return errors.New("openai ws passthrough dialer is nil")
 	}
-
 	dialCtx, cancelDial := context.WithTimeout(ctx, s.openAIWSDialTimeout())
 	defer cancelDial()
 	upstreamConn, statusCode, handshakeHeaders, err := dialer.Dial(dialCtx, wsURL, headers, proxyURL)
 	if err != nil {
+		dialErr := &openAIWSDialError{StatusCode: statusCode, ResponseHeaders: cloneHeader(handshakeHeaders), Err: err}
 		logOpenAIWSV2Passthrough(
 			"relay_dial_failed account_id=%d status_code=%d err=%s",
 			account.ID,
 			statusCode,
 			truncateOpenAIWSLogValue(err.Error(), openAIWSLogValueMaxLen),
 		)
+		s.handleOpenAIWSDialTransientFailure(ctx, account, capturedSessionModel, dialErr)
 		if statusCode == http.StatusTooManyRequests {
 			s.persistOpenAIWSRateLimitSignal(ctx, account, handshakeHeaders, nil, "rate_limit_exceeded", "rate_limit_error", strings.TrimSpace(err.Error()))
 			return &UpstreamFailoverError{
@@ -531,14 +532,15 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						CacheReadInputTokens:     turn.Usage.CacheReadInputTokens,
 						ImageOutputTokens:        turn.Usage.ImageOutputTokens,
 					},
-					Model:           turn.RequestModel,
-					ServiceTier:     usageMeta.serviceTier.Load(),
-					ReasoningEffort: usageMeta.reasoningEffort.Load(),
-					Stream:          true,
-					OpenAIWSMode:    true,
-					ResponseHeaders: cloneHeader(handshakeHeaders),
-					Duration:        turn.Duration,
-					FirstTokenMs:    turn.FirstTokenMs,
+					Model:                 turn.RequestModel,
+					ServiceTier:           usageMeta.serviceTier.Load(),
+					ReasoningEffort:       usageMeta.reasoningEffort.Load(),
+					Stream:                true,
+					OpenAIWSMode:          true,
+					UpstreamTerminalEvent: normalizeOpenAIWSTerminalEvent(turn.TerminalEventType),
+					ResponseHeaders:       cloneHeader(handshakeHeaders),
+					Duration:              turn.Duration,
+					FirstTokenMs:          turn.FirstTokenMs,
 				}
 				logOpenAIWSV2Passthrough(
 					"relay_turn_completed account_id=%d turn=%d request_id=%s terminal_event=%s duration_ms=%d first_token_ms=%d input_tokens=%d output_tokens=%d cache_read_tokens=%d",
@@ -557,10 +559,17 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 			},
 			BeforeWriteClient: func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error {
-				if msgType != coderws.MessageText || wroteDownstream {
+				if msgType != coderws.MessageText {
 					return nil
 				}
-				if eventType, _, _ := parseOpenAIWSEventEnvelope(payload); eventType != "error" {
+				eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
+				if isOpenAIWSTerminalEvent(eventType) {
+					s.handleOpenAIWSTerminalTransientFailure(ctx, account, capturedSessionModel, handshakeHeaders, payload)
+				}
+				if eventType == "error" {
+					s.handleOpenAIWSErrorEventTransientFailure(ctx, account, capturedSessionModel, handshakeHeaders, payload)
+				}
+				if wroteDownstream || eventType != "error" {
 					return nil
 				}
 				errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(payload)
@@ -606,14 +615,15 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			CacheReadInputTokens:     relayResult.Usage.CacheReadInputTokens,
 			ImageOutputTokens:        relayResult.Usage.ImageOutputTokens,
 		},
-		Model:           relayResult.RequestModel,
-		ServiceTier:     usageMeta.serviceTier.Load(),
-		ReasoningEffort: usageMeta.reasoningEffort.Load(),
-		Stream:          true,
-		OpenAIWSMode:    true,
-		ResponseHeaders: cloneHeader(handshakeHeaders),
-		Duration:        relayResult.Duration,
-		FirstTokenMs:    relayResult.FirstTokenMs,
+		Model:                 relayResult.RequestModel,
+		ServiceTier:           usageMeta.serviceTier.Load(),
+		ReasoningEffort:       usageMeta.reasoningEffort.Load(),
+		Stream:                true,
+		OpenAIWSMode:          true,
+		UpstreamTerminalEvent: normalizeOpenAIWSTerminalEvent(relayResult.TerminalEventType),
+		ResponseHeaders:       cloneHeader(handshakeHeaders),
+		Duration:              relayResult.Duration,
+		FirstTokenMs:          relayResult.FirstTokenMs,
 	}
 
 	turnCount := int(completedTurns.Load())

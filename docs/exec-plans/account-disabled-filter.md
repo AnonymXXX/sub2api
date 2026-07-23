@@ -12,7 +12,7 @@ Related requirement: `docs/product-specs/account-disabled-filter.md`.
 - [x] Add failing frontend filter, editor, switch, and usage-date tests.
 - [x] Implement frontend status and usage-date changes.
 - [x] Run focused and broad validation.
-- [ ] Integrate into `anonym/custom`, push, deploy, and observe production.
+- [x] Integrate into `anonym/custom`, push, deploy, and observe production.
 
 ## Validation
 
@@ -49,3 +49,38 @@ The user authorized a push to `origin/anonym/custom` and deployment to
 PostgreSQL backup and tag the current image for rollback. Recreate only the
 application service, retain PostgreSQL and Redis, then verify health, logs,
 account filtering/state controls, and the user usage page's Today default.
+
+## Production Result
+
+Deployed on 2026-07-23:
+
+- Remote branch: `origin/anonym/custom`
+- Application commit: `68042bae`
+- Image: `sub2api-local:v0.1.153-h3`
+- Reported version: `v0.1.153-h3`
+- Application container: healthy with `RestartCount=0`
+- Health response: `{"status":"ok"}`
+- PostgreSQL and Redis remained healthy and were not recreated.
+
+Production verification passed:
+
+- The unified disabled query returned account IDs `19` and `26`; both were
+  legacy-shaped `active` accounts with `schedulable=false`.
+- Selecting Disabled in the admin UI displayed those two accounts.
+- The status menu contains All, Active, Disabled, Error, Rate limited, and
+  Temporarily unschedulable; the standalone Unschedulable option is gone.
+- The user usage page opens with Today and hourly granularity, and Reset
+  restores the same defaults.
+
+Rollback assets:
+
+- Database backup:
+  `/opt/sub2api/backups/pre-disabled-filter-20260723T074720Z.sql.gz`
+- Database backup SHA-256:
+  `8d7014a10e20965fa45007510b3150ae1d10562c77db5f3205e396140a4e9d5c`
+- Compose override backup:
+  `/opt/sub2api/backups/pre-disabled-filter-20260723T074720Z.override.yml`
+- Previous image tag:
+  `sub2api-local:rollback-before-v0.1.153-h3-20260723T074720Z`
+- Previous image ID:
+  `sha256:1df3649ba5da25e7e410bb689ac2f0c7b5c92346bcfe8d455551e13d35f26ca9`

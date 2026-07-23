@@ -331,10 +331,14 @@ func (r *accountRepository) Update(ctx context.Context, account *service.Account
 	if account == nil {
 		return nil
 	}
+	if account.Status == "inactive" {
+		account.Status = service.StatusDisabled
+	}
 	schedulable := account.Schedulable
-	if account.Status == service.StatusError {
+	if account.Status == service.StatusError || account.Status == service.StatusDisabled {
 		schedulable = false
 	}
+	account.Schedulable = schedulable
 
 	builder := r.client.Account.UpdateOneID(account.ID).
 		SetName(account.Name).
@@ -532,22 +536,11 @@ func (r *accountRepository) accountListFilteredQuery(platform, accountType, stat
 					))
 				}),
 			)
-		case "unschedulable":
-			q = q.Where(
-				dbaccount.StatusEQ(service.StatusActive),
+		case service.StatusDisabled, "inactive", "unschedulable":
+			q = q.Where(dbaccount.Or(
+				dbaccount.StatusIn(service.StatusDisabled, "inactive"),
 				dbaccount.SchedulableEQ(false),
-				dbaccount.Or(
-					dbaccount.RateLimitResetAtIsNil(),
-					dbaccount.RateLimitResetAtLTE(time.Now()),
-				),
-				dbpredicate.Account(func(s *entsql.Selector) {
-					col := s.C("temp_unschedulable_until")
-					s.Where(entsql.Or(
-						entsql.IsNull(col),
-						entsql.LTE(col, entsql.Expr("NOW()")),
-					))
-				}),
-			)
+			))
 		default:
 			q = q.Where(dbaccount.StatusEQ(status))
 		}
@@ -1652,6 +1645,15 @@ func isSchedulerNeutralExtraKey(key string) bool {
 func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates service.AccountBulkUpdate) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
+	}
+
+	if updates.Status != nil && *updates.Status == "inactive" {
+		disabled := service.StatusDisabled
+		updates.Status = &disabled
+	}
+	if updates.Status != nil && (*updates.Status == service.StatusError || *updates.Status == service.StatusDisabled) {
+		schedulable := false
+		updates.Schedulable = &schedulable
 	}
 
 	setClauses := make([]string, 0, 8)

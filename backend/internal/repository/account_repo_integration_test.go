@@ -8,6 +8,7 @@ import (
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	dbaccount "github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/accountgroup"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -145,10 +146,12 @@ func (s *AccountRepoSuite) TestUpdate_SyncSchedulerSnapshotOnDisabled() {
 	account.Status = service.StatusDisabled
 	err := s.repo.Update(s.ctx, account)
 	s.Require().NoError(err, "Update")
+	s.Require().False(account.Schedulable)
 
 	s.Require().Len(cacheRecorder.setAccounts, 1)
 	s.Require().Equal(account.ID, cacheRecorder.setAccounts[0].ID)
 	s.Require().Equal(service.StatusDisabled, cacheRecorder.setAccounts[0].Status)
+	s.Require().False(cacheRecorder.setAccounts[0].Schedulable)
 }
 
 func (s *AccountRepoSuite) TestUpdate_SyncSchedulerSnapshotOnCredentialsChange() {
@@ -274,16 +277,53 @@ func (s *AccountRepoSuite) TestListWithFilters() {
 			},
 		},
 		{
-			name: "filter_by_status",
+			name: "filter_by_status_disabled_includes_all_unschedulable_accounts",
 			setup: func(client *dbent.Client) {
-				mustCreateAccount(s.T(), client, &service.Account{Name: "s1", Status: service.StatusActive})
-				mustCreateAccount(s.T(), client, &service.Account{Name: "s2", Status: service.StatusDisabled})
+				mustCreateAccount(s.T(), client, &service.Account{Name: "active-normal", Status: service.StatusActive, Schedulable: true})
+				mustCreateAccount(s.T(), client, &service.Account{Name: "disabled-status", Status: service.StatusDisabled, Schedulable: true})
+				mustCreateAccount(s.T(), client, &service.Account{Name: "inactive-legacy", Status: "inactive", Schedulable: true})
+				activeUnschedulable := mustCreateAccount(s.T(), client, &service.Account{Name: "active-unschedulable", Status: service.StatusActive})
+				rateLimited := mustCreateAccount(s.T(), client, &service.Account{Name: "rate-limited-unschedulable", Status: service.StatusActive})
+				errorUnschedulable := mustCreateAccount(s.T(), client, &service.Account{Name: "error-unschedulable", Status: service.StatusError})
+				_, err := client.Account.Update().
+					Where(dbaccount.IDIn(activeUnschedulable.ID, rateLimited.ID, errorUnschedulable.ID)).
+					SetSchedulable(false).
+					Save(context.Background())
+				s.Require().NoError(err)
+				err = client.Account.UpdateOneID(rateLimited.ID).
+					SetRateLimitResetAt(time.Now().Add(10 * time.Minute)).
+					Exec(context.Background())
+				s.Require().NoError(err)
 			},
 			status:    service.StatusDisabled,
-			wantCount: 1,
+			wantCount: 5,
 			validate: func(accounts []service.Account) {
-				s.Require().Equal(service.StatusDisabled, accounts[0].Status)
+				names := make([]string, 0, len(accounts))
+				for _, account := range accounts {
+					names = append(names, account.Name)
+				}
+				s.ElementsMatch([]string{
+					"disabled-status",
+					"inactive-legacy",
+					"active-unschedulable",
+					"rate-limited-unschedulable",
+					"error-unschedulable",
+				}, names)
 			},
+		},
+		{
+			name: "filter_by_legacy_unschedulable_alias_uses_disabled_semantics",
+			setup: func(client *dbent.Client) {
+				mustCreateAccount(s.T(), client, &service.Account{Name: "active-normal", Status: service.StatusActive, Schedulable: true})
+				mustCreateAccount(s.T(), client, &service.Account{Name: "disabled-status", Status: service.StatusDisabled, Schedulable: true})
+				activeUnschedulable := mustCreateAccount(s.T(), client, &service.Account{Name: "active-unschedulable", Status: service.StatusActive})
+				err := client.Account.UpdateOneID(activeUnschedulable.ID).
+					SetSchedulable(false).
+					Exec(context.Background())
+				s.Require().NoError(err)
+			},
+			status:    "unschedulable",
+			wantCount: 2,
 		},
 		{
 			name: "filter_by_status_active_excludes_runtime_blocked_accounts",
@@ -309,34 +349,6 @@ func (s *AccountRepoSuite) TestListWithFilters() {
 			wantCount: 1,
 			validate: func(accounts []service.Account) {
 				s.Require().Equal("active-normal", accounts[0].Name)
-			},
-		},
-		{
-			name: "filter_by_status_unschedulable_excludes_rate_limited_and_temp_unschedulable",
-			setup: func(client *dbent.Client) {
-				mustCreateAccount(s.T(), client, &service.Account{Name: "active-normal", Status: service.StatusActive, Schedulable: true})
-				unsched := mustCreateAccount(s.T(), client, &service.Account{Name: "active-unsched", Status: service.StatusActive})
-				err := client.Account.UpdateOneID(unsched.ID).
-					SetSchedulable(false).
-					Exec(context.Background())
-				s.Require().NoError(err)
-				rateLimited := mustCreateAccount(s.T(), client, &service.Account{Name: "active-rate-limited", Status: service.StatusActive})
-				err = client.Account.UpdateOneID(rateLimited.ID).
-					SetSchedulable(false).
-					SetRateLimitResetAt(time.Now().Add(10 * time.Minute)).
-					Exec(context.Background())
-				s.Require().NoError(err)
-				tempUnsched := mustCreateAccount(s.T(), client, &service.Account{Name: "active-temp-unsched", Status: service.StatusActive})
-				err = client.Account.UpdateOneID(tempUnsched.ID).
-					SetSchedulable(false).
-					SetTempUnschedulableUntil(time.Now().Add(15 * time.Minute)).
-					Exec(context.Background())
-				s.Require().NoError(err)
-			},
-			status:    "unschedulable",
-			wantCount: 1,
-			validate: func(accounts []service.Account) {
-				s.Require().Equal("active-unsched", accounts[0].Name)
 			},
 		},
 		{

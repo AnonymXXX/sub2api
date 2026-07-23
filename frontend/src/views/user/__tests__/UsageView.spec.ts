@@ -96,6 +96,9 @@ vi.mock('vue-i18n', async () => {
 const simpleStub = { template: '<div><slot /></div>' }
 const chartStub = { template: '<div />' }
 
+const formatLocalDate = (date: Date): string =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+
 const usageLog = {
   id: 1,
   request_id: 'req-user-export',
@@ -195,16 +198,56 @@ describe('user UsageView', () => {
     mountUsageView()
     await flushPromises()
 
-    expect(query).toHaveBeenCalled()
-    expect(getStats).toHaveBeenCalled()
-    expect(getDashboardModels).toHaveBeenCalled()
+    const today = formatLocalDate(new Date())
+
+    expect(query).toHaveBeenCalledWith(expect.objectContaining({
+      start_date: today,
+      end_date: today,
+    }), expect.any(Object))
+    expect(getStats).toHaveBeenCalledWith(expect.objectContaining({
+      start_date: today,
+      end_date: today,
+    }))
+    expect(getDashboardModels).toHaveBeenCalledWith(expect.objectContaining({
+      start_date: today,
+      end_date: today,
+    }))
     expect(getDashboardSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({
+      start_date: today,
+      end_date: today,
+      granularity: 'hour',
       include_trend: true,
       include_model_stats: false,
       include_group_stats: true,
     }))
     expect(list).toHaveBeenCalledWith(1, 100)
     expect(getAvailable).toHaveBeenCalled()
+  })
+
+  it('resets the date range to today with hourly granularity', async () => {
+    const wrapper = mountUsageView()
+    await flushPromises()
+    query.mockClear()
+    getDashboardSnapshotV2.mockClear()
+
+    const resetButton = wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'Reset')
+    expect(resetButton).toBeDefined()
+
+    await resetButton!.trigger('click')
+    await flushPromises()
+
+    const today = formatLocalDate(new Date())
+    expect(query).toHaveBeenCalledWith(expect.objectContaining({
+      start_date: today,
+      end_date: today,
+    }), expect.any(Object))
+    expect(getDashboardSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({
+      start_date: today,
+      end_date: today,
+      granularity: 'hour',
+    }))
   })
 
   it('exports csv with current filters and without admin-only fields', async () => {

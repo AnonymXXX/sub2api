@@ -41,7 +41,7 @@ const SelectStub = defineComponent({
 })
 
 describe('AccountTableFilters', () => {
-  it('uses the backend disabled status when selecting the inactive label', async () => {
+  it('exposes one disabled filter and removes the standalone unschedulable filter', async () => {
     const wrapper = mount(AccountTableFilters, {
       props: {
         searchQuery: '',
@@ -62,12 +62,13 @@ describe('AccountTableFilters', () => {
       }
     })
 
-    const inactiveOption = wrapper
+    const disabledOption = wrapper
       .findAll('button')
-      .find((button) => button.text() === 'admin.accounts.status.inactive')
+      .find((button) => button.text() === 'admin.accounts.status.disabled')
 
-    expect(inactiveOption).toBeDefined()
-    await inactiveOption!.trigger('click')
+    expect(disabledOption).toBeDefined()
+    expect(wrapper.text()).not.toContain('admin.accounts.status.unschedulable')
+    await disabledOption!.trigger('click')
 
     expect(wrapper.emitted('update:filters')).toContainEqual([
       expect.objectContaining({ status: 'disabled' })

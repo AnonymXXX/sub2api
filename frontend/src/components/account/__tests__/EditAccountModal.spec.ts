@@ -316,6 +316,42 @@ describe('EditAccountModal', () => {
     authIsSimpleMode.value = true
   })
 
+  it('normalizes a legacy inactive account to disabled when editing', async () => {
+    const account = buildAccount()
+    account.status = 'inactive'
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue({ ...account, status: 'disabled', schedulable: false })
+
+    const wrapper = mountModal(account)
+    const disabledOption = wrapper
+      .findAll('option')
+      .find((option) => option.text() === 'admin.accounts.status.disabled')
+
+    expect(disabledOption?.attributes('value')).toBe('disabled')
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.status).toBe('disabled')
+  })
+
+  it('does not re-enable an automatically unschedulable active account when status is unchanged', async () => {
+    const account = buildAccount()
+    account.schedulable = false
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]).not.toHaveProperty('status')
+  })
+
   it('reopening the same account rehydrates the OpenAI whitelist from props', async () => {
     const account = buildAccount()
     updateAccountMock.mockReset()

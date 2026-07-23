@@ -176,7 +176,7 @@ export async function deleteAccount(id: number): Promise<{ message: string }> {
  * @param status - New status
  * @returns Updated account
  */
-export async function toggleStatus(id: number, status: 'active' | 'inactive'): Promise<Account> {
+export async function toggleStatus(id: number, status: 'active' | 'disabled'): Promise<Account> {
   return update(id, { status })
 }
 

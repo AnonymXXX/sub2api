@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 
 import DateRangePicker from '../DateRangePicker.vue'
 
@@ -34,6 +34,26 @@ const formatLocalDate = (date: Date): string => {
 }
 
 describe('DateRangePicker', () => {
+  it('recognizes a same-day range as Today', async () => {
+    const today = formatLocalDate(new Date())
+
+    const wrapper = mount(DateRangePicker, {
+      props: {
+        startDate: today,
+        endDate: today
+      },
+      global: {
+        stubs: {
+          Icon: true
+        }
+      }
+    })
+
+    await nextTick()
+
+    expect(wrapper.text()).toContain('Today')
+  })
+
   it('uses last 24 hours as the default recognized preset', () => {
     const now = new Date()
     const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000)

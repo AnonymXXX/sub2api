@@ -127,6 +127,7 @@ export default {
         'Antigravity standard-tier accounts that do not receive an automatic project_id need a user-owned GCP project.',
       status: {
         active: 'Active',
+        disabled: 'Disabled',
         inactive: 'Inactive',
         error: 'Error',
         cooldown: 'Cooldown',

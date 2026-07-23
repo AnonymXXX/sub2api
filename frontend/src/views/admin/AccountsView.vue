@@ -1380,7 +1380,10 @@ const handleBulkRefreshToken = async () => {
 const updateSchedulableInList = (accountIds: number[], schedulable: boolean) => {
   if (accountIds.length === 0) return
   const idSet = new Set(accountIds)
-  accounts.value = accounts.value.map((account) => (idSet.has(account.id) ? { ...account, schedulable } : account))
+  const updatedAccounts = accounts.value
+    .filter(account => idSet.has(account.id))
+    .map((account): Account => ({ ...account, status: schedulable ? 'active' : 'disabled', schedulable }))
+  updatedAccounts.forEach(patchAccountInList)
 }
 const normalizeBulkSchedulableResult = (
   result: {
@@ -1560,8 +1563,8 @@ const accountMatchesCurrentFilters = (account: Account) => {
       if (account.status !== 'active' || !isRateLimited || isTempUnschedulable) return false
     } else if (filters.status === 'temp_unschedulable') {
       if (account.status !== 'active' || !isTempUnschedulable) return false
-    } else if (filters.status === 'unschedulable') {
-      if (account.status !== 'active' || account.schedulable || isRateLimited || isTempUnschedulable) return false
+    } else if (filters.status === 'disabled' || filters.status === 'inactive' || filters.status === 'unschedulable') {
+      if (account.status !== 'disabled' && account.status !== 'inactive' && account.schedulable) return false
     } else if (account.status !== filters.status) {
       return false
     }
@@ -1795,7 +1798,11 @@ const handleToggleSchedulable = async (a: Account) => {
   togglingSchedulable.value = a.id
   try {
     const updated = await adminAPI.accounts.setSchedulable(a.id, nextSchedulable)
-    updateSchedulableInList([a.id], updated?.schedulable ?? nextSchedulable)
+    if (updated) {
+      patchAccountInList(updated)
+    } else {
+      updateSchedulableInList([a.id], nextSchedulable)
+    }
     enterAutoRefreshSilentWindow()
   } catch (error) {
     console.error('Failed to toggle schedulable:', error)

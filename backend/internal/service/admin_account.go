@@ -295,7 +295,12 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 	if input.Status != "" {
-		account.Status = input.Status
+		status, schedulable, err := normalizeManualAccountState(input.Status, nil)
+		if err != nil {
+			return nil, err
+		}
+		account.Status = status
+		account.Schedulable = *schedulable
 	}
 	if input.ExpiresAt != nil {
 		if *input.ExpiresAt <= 0 {
@@ -362,6 +367,13 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 // BulkUpdateAccounts updates multiple accounts in one request.
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
+	status, schedulable, err := normalizeManualAccountState(input.Status, input.Schedulable)
+	if err != nil {
+		return nil, err
+	}
+	input.Status = status
+	input.Schedulable = schedulable
+
 	if len(input.AccountIDs) == 0 && input.Filters != nil {
 		accountIDs, err := s.resolveBulkUpdateTargetIDs(ctx, input.Filters)
 		if err != nil {
@@ -634,7 +646,14 @@ func (s *adminServiceImpl) SetAccountError(ctx context.Context, id int64, errorM
 }
 
 func (s *adminServiceImpl) SetAccountSchedulable(ctx context.Context, id int64, schedulable bool) (*Account, error) {
-	if err := s.accountRepo.SetSchedulable(ctx, id, schedulable); err != nil {
+	status, normalizedSchedulable, err := normalizeManualAccountState("", &schedulable)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.accountRepo.BulkUpdate(ctx, []int64{id}, AccountBulkUpdate{
+		Status:      &status,
+		Schedulable: normalizedSchedulable,
+	}); err != nil {
 		return nil, err
 	}
 	updated, err := s.accountRepo.GetByID(ctx, id)
@@ -642,6 +661,41 @@ func (s *adminServiceImpl) SetAccountSchedulable(ctx context.Context, id int64, 
 		return nil, err
 	}
 	return updated, nil
+}
+
+func normalizeManualAccountState(status string, schedulable *bool) (string, *bool, error) {
+	if status == "inactive" {
+		status = StatusDisabled
+	}
+
+	var statusSchedulable *bool
+	switch status {
+	case "":
+	case StatusActive:
+		statusSchedulable = accountStateBoolPtr(true)
+	case StatusDisabled, StatusError:
+		statusSchedulable = accountStateBoolPtr(false)
+	default:
+		return "", nil, infraerrors.Newf(http.StatusBadRequest, "ACCOUNT_STATUS_INVALID", "unsupported account status %q", status)
+	}
+
+	if schedulable != nil && statusSchedulable != nil && *schedulable != *statusSchedulable {
+		return "", nil, infraerrors.New(http.StatusBadRequest, "ACCOUNT_STATE_CONFLICT", "status and schedulable must describe the same manual account state")
+	}
+	if statusSchedulable != nil {
+		return status, statusSchedulable, nil
+	}
+	if schedulable != nil {
+		if *schedulable {
+			return StatusActive, accountStateBoolPtr(true), nil
+		}
+		return StatusDisabled, accountStateBoolPtr(false), nil
+	}
+	return "", nil, nil
+}
+
+func accountStateBoolPtr(value bool) *bool {
+	return &value
 }
 
 func (s *adminServiceImpl) RevertAccountProxyFallback(ctx context.Context, id int64) error {

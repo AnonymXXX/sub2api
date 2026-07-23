@@ -5,9 +5,11 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"reflect"
 	"testing"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/stretchr/testify/require"
 )
@@ -16,6 +18,7 @@ type accountRepoStubForBulkUpdate struct {
 	accountRepoStub
 	bulkUpdateErr    error
 	bulkUpdateIDs    []int64
+	bulkUpdateValue  AccountBulkUpdate
 	bindGroupErrByID map[int64]error
 	bindGroupsCalls  []int64
 	getByIDsAccounts []*Account
@@ -42,8 +45,9 @@ type accountRepoStubForBulkUpdate struct {
 	}
 }
 
-func (s *accountRepoStubForBulkUpdate) BulkUpdate(_ context.Context, ids []int64, _ AccountBulkUpdate) (int64, error) {
+func (s *accountRepoStubForBulkUpdate) BulkUpdate(_ context.Context, ids []int64, updates AccountBulkUpdate) (int64, error) {
 	s.bulkUpdateIDs = append([]int64{}, ids...)
+	s.bulkUpdateValue = updates
 	if s.bulkUpdateErr != nil {
 		return 0, s.bulkUpdateErr
 	}
@@ -249,4 +253,62 @@ func TestAdminServiceBulkUpdateAccounts_ResolvesIDsFromFilters(t *testing.T) {
 	require.Equal(t, 2, result.Success)
 	require.Equal(t, 0, result.Failed)
 	require.Equal(t, []int64{7, 11}, result.SuccessIDs)
+}
+
+func TestAdminServiceBulkUpdateAccounts_NormalizesStatusAndSchedulable(t *testing.T) {
+	tests := []struct {
+		name            string
+		status          string
+		schedulable     *bool
+		wantStatus      string
+		wantSchedulable bool
+	}{
+		{name: "legacy inactive disables scheduling", status: "inactive", wantStatus: StatusDisabled, wantSchedulable: false},
+		{name: "disabled disables scheduling", status: StatusDisabled, wantStatus: StatusDisabled, wantSchedulable: false},
+		{name: "error disables scheduling", status: StatusError, wantStatus: StatusError, wantSchedulable: false},
+		{name: "active enables scheduling", status: StatusActive, wantStatus: StatusActive, wantSchedulable: true},
+		{name: "scheduling off disables account", schedulable: boolPointer(false), wantStatus: StatusDisabled, wantSchedulable: false},
+		{name: "scheduling on activates account", schedulable: boolPointer(true), wantStatus: StatusActive, wantSchedulable: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &accountRepoStubForBulkUpdate{}
+			svc := &adminServiceImpl{accountRepo: repo}
+
+			result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+				AccountIDs:  []int64{1},
+				Status:      tt.status,
+				Schedulable: tt.schedulable,
+			})
+
+			require.NoError(t, err)
+			require.Equal(t, 1, result.Success)
+			require.NotNil(t, repo.bulkUpdateValue.Status)
+			require.Equal(t, tt.wantStatus, *repo.bulkUpdateValue.Status)
+			require.NotNil(t, repo.bulkUpdateValue.Schedulable)
+			require.Equal(t, tt.wantSchedulable, *repo.bulkUpdateValue.Schedulable)
+		})
+	}
+}
+
+func TestAdminServiceBulkUpdateAccounts_RejectsConflictingState(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{}
+	svc := &adminServiceImpl{accountRepo: repo}
+	schedulable := false
+
+	result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs:  []int64{1},
+		Status:      StatusActive,
+		Schedulable: &schedulable,
+	})
+
+	require.Nil(t, result)
+	require.Error(t, err)
+	require.Equal(t, http.StatusBadRequest, infraerrors.Code(err))
+	require.Empty(t, repo.bulkUpdateIDs)
+}
+
+func boolPointer(value bool) *bool {
+	return &value
 }

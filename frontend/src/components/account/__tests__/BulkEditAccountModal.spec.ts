@@ -369,4 +369,22 @@ describe('BulkEditAccountModal', () => {
       status: 'active'
     })
   })
+
+  it('批量停用应提交 canonical disabled 状态', async () => {
+    const wrapper = mountModal()
+    const disabledOption = wrapper
+      .findAll('#bulk-edit-status option')
+      .find((option) => option.text() === 'admin.accounts.status.disabled')
+
+    expect(disabledOption?.attributes('value')).toBe('disabled')
+
+    await wrapper.get('#bulk-edit-status-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-status select').setValue('disabled')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      status: 'disabled'
+    })
+  })
 })

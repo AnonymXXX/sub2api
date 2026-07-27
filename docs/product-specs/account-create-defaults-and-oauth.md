@@ -37,7 +37,7 @@ existing error handling.
 
 ## Status And Links
 
-- Status: implemented locally; not deployed
+- Status: deployment authorized; implementation validated locally
 - Implementation:
   `frontend/src/components/account/CreateAccountModal.vue`
 - Regression coverage:

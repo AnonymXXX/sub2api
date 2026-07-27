@@ -1,6 +1,15 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, nextTick, ref } from 'vue'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
+
+const openAIOAuthMock = vi.hoisted(() => ({
+  authUrl: { value: '' },
+  generateAuthUrl: vi.fn()
+}))
+
+const clipboardMock = vi.hoisted(() => ({
+  copyToClipboard: vi.fn()
+}))
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
@@ -81,17 +90,24 @@ vi.mock('@/composables/useAccountOAuth', () => ({
 
 vi.mock('@/composables/useOpenAIOAuth', () => ({
   useOpenAIOAuth: () => ({
-    authUrl: ref(''),
+    authUrl: openAIOAuthMock.authUrl,
     sessionId: ref(''),
     oauthState: ref(''),
     loading: ref(false),
     error: ref(''),
     resetState: vi.fn(),
-    generateAuthUrl: vi.fn(),
+    generateAuthUrl: openAIOAuthMock.generateAuthUrl,
     exchangeAuthCode: vi.fn(),
     validateRefreshToken: vi.fn(),
     buildCredentials: vi.fn(() => ({})),
     buildExtraInfo: vi.fn(() => undefined)
+  })
+}))
+
+vi.mock('@/composables/useClipboard', () => ({
+  useClipboard: () => ({
+    copied: ref(false),
+    copyToClipboard: clipboardMock.copyToClipboard
   })
 }))
 
@@ -172,7 +188,7 @@ const GroupSelectorStub = defineComponent({
 })
 
 const SelectStub = defineComponent({
-  name: 'Select',
+  name: 'AppSelect',
   props: {
     modelValue: {
       type: [String, Number, Boolean, null],
@@ -259,6 +275,15 @@ function mountModal(show = false) {
 }
 
 describe('CreateAccountModal', () => {
+  beforeEach(() => {
+    openAIOAuthMock.authUrl.value = ''
+    openAIOAuthMock.generateAuthUrl.mockReset().mockImplementation(async () => {
+      openAIOAuthMock.authUrl.value = 'https://auth.openai.example/authorize?state=test'
+      return true
+    })
+    clipboardMock.copyToClipboard.mockReset().mockResolvedValue(true)
+  })
+
   it('打开添加账号弹窗时默认使用 GPT-Plus OpenAI 配置', async () => {
     const wrapper = mountModal()
 
@@ -267,10 +292,11 @@ describe('CreateAccountModal', () => {
 
     expect((wrapper.get('[data-tour="account-form-name"]').element as HTMLInputElement).value).toBe('GPT-Plus')
     expect(wrapper.get('[data-testid="account-platform-openai"]').classes()).toContain('text-green-600')
-    expect((wrapper.get('[data-testid="account-concurrency"]').element as HTMLInputElement).value).toBe('2')
+    expect((wrapper.get('[data-testid="account-concurrency"]').element as HTMLInputElement).value).toBe('3')
+    expect((wrapper.get('[data-testid="account-load-factor"]').element as HTMLInputElement).placeholder).toBe('3')
     expect(wrapper.get('[data-testid="group-selector-value"]').text()).toBe('6')
     expect(wrapper.get('[data-testid="model-whitelist-value"]').text()).toBe(
-      'gpt-5.5,codex-auto-review,gpt-5.4,gpt-5.4-mini'
+      'gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna,gpt-5.5,codex-auto-review,gpt-5.4,gpt-5.4-mini'
     )
     expect(wrapper.get('[data-testid="openai-codex-cli-only-toggle"]').classes()).toContain('bg-primary-600')
   })
@@ -285,7 +311,7 @@ describe('CreateAccountModal', () => {
     await nextTick()
 
     expect(wrapper.get('[data-testid="model-whitelist-value"]').text()).toBe(
-      'gpt-5.5,codex-auto-review,gpt-5.4,gpt-5.4-mini'
+      'gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna,gpt-5.5,codex-auto-review,gpt-5.4,gpt-5.4-mini'
     )
   })
 
@@ -295,13 +321,30 @@ describe('CreateAccountModal', () => {
     await wrapper.setProps({ show: true })
     await nextTick()
 
-    expect((wrapper.get('[data-testid="account-concurrency"]').element as HTMLInputElement).value).toBe('2')
+    expect((wrapper.get('[data-testid="account-concurrency"]').element as HTMLInputElement).value).toBe('3')
 
     await wrapper.get('[data-testid="account-platform-openai"]').trigger('click')
     await nextTick()
 
     expect(wrapper.get('[data-testid="group-selector-value"]').text()).toBe('6')
-    expect((wrapper.get('[data-testid="account-concurrency"]').element as HTMLInputElement).value).toBe('2')
+    expect((wrapper.get('[data-testid="account-concurrency"]').element as HTMLInputElement).value).toBe('3')
     expect(wrapper.get('[data-testid="openai-codex-cli-only-toggle"]').classes()).toContain('bg-primary-600')
+  })
+
+  it('进入 OpenAI OAuth 授权步骤时自动生成并复制授权链接', async () => {
+    const wrapper = mountModal()
+
+    await wrapper.setProps({ show: true })
+    await nextTick()
+    await wrapper.get('#create-account-form').trigger('submit')
+    await flushPromises()
+
+    expect(openAIOAuthMock.generateAuthUrl).toHaveBeenCalledOnce()
+    expect(openAIOAuthMock.generateAuthUrl).toHaveBeenCalledWith(null)
+    expect(clipboardMock.copyToClipboard).toHaveBeenCalledOnce()
+    expect(clipboardMock.copyToClipboard).toHaveBeenCalledWith(
+      'https://auth.openai.example/authorize?state=test'
+    )
+    expect(wrapper.find('#create-account-form').exists()).toBe(false)
   })
 })

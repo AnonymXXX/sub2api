@@ -2680,6 +2680,7 @@
           <label class="input-label">{{ t('admin.accounts.loadFactor') }}</label>
           <input v-model.number="form.load_factor" type="number" min="1"
             class="input" :placeholder="String(form.concurrency || 1)"
+            data-testid="account-load-factor"
             @input="form.load_factor = (form.load_factor &amp;&amp; form.load_factor >= 1) ? form.load_factor : null" />
           <p class="input-hint">{{ t('admin.accounts.loadFactorHint') }}</p>
         </div>
@@ -3438,6 +3439,7 @@ import { useOpenAIOAuth } from '@/composables/useOpenAIOAuth'
 import { useGeminiOAuth } from '@/composables/useGeminiOAuth'
 import { useAntigravityOAuth } from '@/composables/useAntigravityOAuth'
 import { useGrokOAuth } from '@/composables/useGrokOAuth'
+import { useClipboard } from '@/composables/useClipboard'
 import type {
   Proxy,
   AdminGroup,
@@ -3537,6 +3539,7 @@ const emit = defineEmits<{
 }>()
 
 const appStore = useAppStore()
+const { copyToClipboard } = useClipboard()
 
 // OAuth composables
 const oauth = useAccountOAuth() // For Anthropic OAuth
@@ -3601,7 +3604,7 @@ const accountCategory = ref<'oauth-based' | 'apikey' | 'bedrock' | 'service_acco
 const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-token'
 const DEFAULT_ACCOUNT_NAME = 'GPT-Plus'
 const DEFAULT_ACCOUNT_PLATFORM: AccountPlatform = 'openai'
-const DEFAULT_ACCOUNT_CONCURRENCY = 2
+const DEFAULT_ACCOUNT_CONCURRENCY = 3
 
 const apiKeyBaseUrl = ref('https://api.openai.com')
 const apiKeyValue = ref('')
@@ -4809,6 +4812,12 @@ const handleSubmit = async () => {
       return
     }
     step.value = 2
+    if (form.platform === 'openai') {
+      const generated = await openaiOAuth.generateAuthUrl(form.proxy_id)
+      if (generated && openaiOAuth.authUrl.value) {
+        await copyToClipboard(openaiOAuth.authUrl.value)
+      }
+    }
     return
   }
 

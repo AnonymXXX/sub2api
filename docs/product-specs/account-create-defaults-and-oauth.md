@@ -37,8 +37,20 @@ existing error handling.
 
 ## Status And Links
 
-- Status: deployment authorized; implementation validated locally
+- Status: deployed on 2026-07-27
 - Implementation:
   `frontend/src/components/account/CreateAccountModal.vue`
 - Regression coverage:
   `frontend/src/components/account/__tests__/CreateAccountModal.spec.ts`
+
+## Deployment Record
+
+- Production image: `sub2api-local:v0.1.153-h4`
+- Built commit: `a6ed55aa`
+- PostgreSQL backup:
+  `/opt/sub2api/backups/pre-deploy-20260727063902.sql.gz`
+- Compose override backup:
+  `/opt/sub2api/backups/docker-compose.override.pre-deploy-20260727063902.yml`
+- Rollback image: `sub2api-local:rollback-20260727063902`
+- Verification: application healthy with zero restarts; PostgreSQL and Redis
+  remained healthy and retained their pre-deployment container IDs.

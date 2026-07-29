@@ -1259,6 +1259,13 @@ func opsNullInt(v any) any {
 	}
 }
 
+func opsNullableInt(v *int) any {
+	if v == nil {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: int64(*v), Valid: true}
+}
+
 func opsNullInt16(v *int16) any {
 	if v == nil {
 		return sql.NullInt64{}

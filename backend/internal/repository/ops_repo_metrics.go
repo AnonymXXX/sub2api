@@ -144,7 +144,7 @@ INSERT INTO ops_system_metrics (
 		opsNullInt(input.DBConnWaiting),
 
 		opsNullInt(input.GoroutineCount),
-		opsNullInt(input.ConcurrencyQueueDepth),
+		opsNullableInt(input.ConcurrencyQueueDepth),
 	)
 	return err
 }

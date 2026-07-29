@@ -35,7 +35,6 @@ request rewriting, response streaming, or output-token enforcement behavior.
 
 ## Status And Links
 
-- Status: queue metric deployed; allocator setting staged pending a zero live
-  concurrency restart window
+- Status: deployed and verified in production
 - Related execution plan:
   `docs/exec-plans/ops-concurrency-queue-metrics-and-proxy-memory.md`

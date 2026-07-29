@@ -14,12 +14,9 @@ Related requirement:
 - [x] Run focused and broad backend validation.
 - [x] Integrate and push the validated commit to `anonym/custom`.
 - [x] Back up PostgreSQL and deploy only the Sub2API application container.
-- [ ] Back up the token-limiter systemd unit, add `MALLOC_ARENA_MAX=2`, and
-  restart it only at zero live concurrency. The backup and unit update are
-  complete; restart remains pending because account concurrency stayed above
-  zero throughout the observation window.
-- [ ] Verify health, deployed commit, queue samples, RSS, and logs. Application
-  verification is complete; post-restart limiter RSS verification remains.
+- [x] Back up the token-limiter systemd unit, add `MALLOC_ARENA_MAX=2`, and
+  restart it only at zero live concurrency.
+- [x] Verify health, deployed commit, queue samples, RSS, and logs.
 
 ## Deployment Boundary
 
@@ -48,8 +45,13 @@ one-minute rows after the application deployment.
   connection-reset, or connection-refused lines during the observation window.
 - The token-limiter unit backup is
   `/etc/systemd/system/sub2api-token-limiter.service.pre-arena-20260729013547`.
-  `MALLOC_ARENA_MAX=2` is loaded in the unit definition, but the running process
-  is still the pre-change PID because fresh account concurrency remained between
-  one and four slots with zero waiters.
+  The service was restarted only after three consecutive samples reported zero
+  account slots and zero waiters. The new process environment contains
+  `MALLOC_ARENA_MAX=2`.
+- The token limiter and application health endpoints both returned HTTP `200`
+  after restart. New traffic reached two active account slots with zero waiters,
+  and neither service logged errors, OOMs, HTTP 502s, or connection failures.
+- Token-limiter RSS was approximately 18 MiB immediately after restart and
+  approximately 33 MiB after one minute of resumed traffic.
 - Docker build cache was removed. The root filesystem had 21 GiB available at
   41 percent use after cleanup.

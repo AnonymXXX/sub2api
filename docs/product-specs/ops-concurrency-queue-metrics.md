@@ -19,7 +19,8 @@ request rewriting, response streaming, or output-token enforcement behavior.
 - The token-limiter service restarts only after real-time account concurrency
   reaches `0`.
 - After restart, the proxy is active, requests still reach Sub2API, and its RSS
-  is materially below the pre-change baseline of approximately 900 MiB.
+  does not return to the previously observed high-water range of approximately
+  900 MiB under comparable traffic.
 - PostgreSQL and Redis are not restarted by this rollout.
 
 ## Assumptions And Boundaries
@@ -34,6 +35,7 @@ request rewriting, response streaming, or output-token enforcement behavior.
 
 ## Status And Links
 
-- Status: implemented, production rollout pending
+- Status: queue metric deployed; allocator setting staged pending a zero live
+  concurrency restart window
 - Related execution plan:
   `docs/exec-plans/ops-concurrency-queue-metrics-and-proxy-memory.md`

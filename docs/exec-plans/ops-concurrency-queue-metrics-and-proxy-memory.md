@@ -12,11 +12,14 @@ Related requirement:
 - [x] Add a failing repository regression test for queue depth zero.
 - [x] Preserve zero only for `concurrency_queue_depth` and keep nil nullable.
 - [x] Run focused and broad backend validation.
-- [ ] Integrate and push the validated commit to `anonym/custom`.
-- [ ] Back up PostgreSQL and deploy only the Sub2API application container.
+- [x] Integrate and push the validated commit to `anonym/custom`.
+- [x] Back up PostgreSQL and deploy only the Sub2API application container.
 - [ ] Back up the token-limiter systemd unit, add `MALLOC_ARENA_MAX=2`, and
-  restart it only at zero live concurrency.
-- [ ] Verify health, deployed commit, queue samples, RSS, and logs.
+  restart it only at zero live concurrency. The backup and unit update are
+  complete; restart remains pending because account concurrency stayed above
+  zero throughout the observation window.
+- [ ] Verify health, deployed commit, queue samples, RSS, and logs. Application
+  verification is complete; post-restart limiter RSS verification remains.
 
 ## Deployment Boundary
 
@@ -35,3 +38,18 @@ one-minute rows after the application deployment.
 - `go test ./... -count=1`: passed.
 - `go build ./cmd/server`: passed.
 - `git diff --check`: passed.
+- Commit `32f2f9b0` was pushed to `origin/anonym/custom` and deployed as
+  `sub2api-local:v0.1.153-h5`.
+- The application health endpoint returned HTTP `200`; PostgreSQL and Redis
+  container IDs were unchanged.
+- The first complete post-deploy minute stored `concurrency_queue_depth=0`;
+  pre-deploy minute rows remained `NULL`.
+- Post-deploy application logs contained no error, panic, fatal, OOM, HTTP 502,
+  connection-reset, or connection-refused lines during the observation window.
+- The token-limiter unit backup is
+  `/etc/systemd/system/sub2api-token-limiter.service.pre-arena-20260729013547`.
+  `MALLOC_ARENA_MAX=2` is loaded in the unit definition, but the running process
+  is still the pre-change PID because fresh account concurrency remained between
+  one and four slots with zero waiters.
+- Docker build cache was removed. The root filesystem had 21 GiB available at
+  41 percent use after cleanup.

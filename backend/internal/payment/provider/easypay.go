@@ -258,7 +258,7 @@ func (e *EasyPay) QueryOrder(ctx context.Context, tradeNo string) (*payment.Quer
 		"act": "order", "pid": e.config["pid"],
 		"key": e.config["pkey"], "out_trade_no": tradeNo,
 	}
-	body, err := e.post(ctx, e.apiBase()+"/api.php", params)
+	body, err := e.get(ctx, e.apiBase()+"/api.php", params)
 	if err != nil {
 		return nil, fmt.Errorf("easypay query: %w", err)
 	}
@@ -500,6 +500,25 @@ func (e *EasyPay) post(ctx context.Context, endpoint string, params map[string]s
 	return body, err
 }
 
+func (e *EasyPay) get(ctx context.Context, endpoint string, params map[string]string) ([]byte, error) {
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	query := parsed.Query()
+	for k, v := range params {
+		query.Set(k, v)
+	}
+	parsed.RawQuery = query.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	body, _, err := e.do(req)
+	return body, err
+}
+
 func (e *EasyPay) postRaw(ctx context.Context, endpoint string, params map[string]string) ([]byte, int, error) {
 	form := url.Values{}
 	for k, v := range params {
@@ -510,6 +529,10 @@ func (e *EasyPay) postRaw(ctx context.Context, endpoint string, params map[strin
 		return nil, 0, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return e.do(req)
+}
+
+func (e *EasyPay) do(req *http.Request) ([]byte, int, error) {
 	client := e.httpClient
 	if client == nil {
 		client = &http.Client{Timeout: easypayHTTPTimeout}

@@ -13,7 +13,8 @@ Related requirement:
 - [x] Validate focused backend and frontend payment tests.
 - [x] Submit the ZPAY Alipay small-merchant application and pay the opening fee.
 - [x] Change EasyPay order recovery to use ZPAY's documented GET query API.
-- [ ] Integrate the validated query compatibility fix into `anonym/custom`.
+- [x] Integrate the validated query compatibility fix into local `anonym/custom`.
+- [ ] Push `anonym/custom` and deploy the fix after explicit authorization.
 - [ ] Wait for merchant approval and complete owner Alipay signing.
 - [ ] Store the approved PID and PKey in an encrypted, initially disabled provider instance.
 - [ ] Verify a real CNY 10 balance recharge and duplicate callback handling.

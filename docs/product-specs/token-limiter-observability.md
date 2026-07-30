@@ -46,12 +46,14 @@ raw exception messages.
 - Connect and relay timeouts have distinct fixed reasons.
 - `127.0.0.1:18081/metrics` is served without contacting Sub2API and contains
   no request data.
-- Production deployment backs up the current script and systemd unit, restarts
-  only after account concurrency and waiters reach zero, and leaves Sub2API,
-  PostgreSQL, and Redis running.
+- Production deployment backs up the current script and systemd unit and leaves
+  Sub2API, PostgreSQL, and Redis running. The normal restart gate requires zero
+  account concurrency and zero waiters; a restart with active requests requires
+  explicit user authorization and must be recorded as a deployment exception.
 
 ## Status And Links
 
-- Status: implementation validated, production deployment pending
+- Status: deployed and production-validated on 2026-07-30
+- Implementation commit: `b963115f`
 - Related execution plan:
   `docs/exec-plans/token-limiter-observability.md`

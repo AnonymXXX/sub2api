@@ -14,7 +14,7 @@ Related requirement:
 - [x] Submit the ZPAY Alipay small-merchant application and pay the opening fee.
 - [x] Change EasyPay order recovery to use ZPAY's documented GET query API.
 - [x] Integrate the validated query compatibility fix into local `anonym/custom`.
-- [ ] Push `anonym/custom` and deploy the fix after explicit authorization.
+- [x] Push `anonym/custom` and deploy the fix after explicit authorization.
 - [ ] Wait for merchant approval and complete owner Alipay signing.
 - [ ] Store the approved PID and PKey in an encrypted, initially disabled provider instance.
 - [ ] Verify a real CNY 10 balance recharge and duplicate callback handling.
@@ -47,3 +47,12 @@ database changes require a fresh backup and a verified rollback path.
 - `git diff --check`: passed.
 - Harness docs audit: no errors; seven pre-existing warnings remain outside this
   task's documents.
+- `anonym/custom` was pushed through `70842dfc` and production was rebuilt from
+  that exact commit.
+- Production deployment backup:
+  `/opt/sub2api/backups/pre-deploy-20260730084111.sql.gz` (gzip integrity
+  verified, mode `600`).
+- Post-deploy checks: application healthy, `/health` HTTP 200, PostgreSQL and
+  Redis container IDs unchanged, no matching startup errors, payment and both
+  visible-method switches disabled, four plans not for sale, zero provider
+  instances, and zero payment orders.

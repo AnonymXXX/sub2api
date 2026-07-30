@@ -1,0 +1,28 @@
+[Unit]
+Description=Sub2API request token limiter proxy
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=MALLOC_ARENA_MAX=2
+Environment=LISTEN_HOST=127.0.0.1
+Environment=LISTEN_PORT=18080
+Environment=METRICS_HOST=127.0.0.1
+Environment=METRICS_PORT=18081
+Environment=UPSTREAM_HOST=127.0.0.1
+Environment=UPSTREAM_PORT=8080
+Environment=MAX_OUTPUT_TOKENS=8192
+Environment=CONNECT_TIMEOUT_SECONDS=30
+Environment=UPSTREAM_IDLE_TIMEOUT_SECONDS=900
+Environment=ALERT_WINDOW_SECONDS=600
+Environment=ALERT_COOLDOWN_SECONDS=600
+Environment=ALERT_413_THRESHOLD=5
+Environment=ALERT_502_THRESHOLD=3
+ExecStart=/usr/bin/python3 /opt/sub2api-token-limiter/sub2api_token_limiter_proxy.py
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

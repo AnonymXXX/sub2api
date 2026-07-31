@@ -197,6 +197,27 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	// Determine billing type
 	isSubscriptionBilling := subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
+	fallbackBalanceCost := cost.ActualCost
+	if isSubscriptionBilling && apiKey.BalanceGroup != nil {
+		balanceKey := apiKey.ForBalanceBilling()
+		balanceMultiplier := 1.0
+		if s.cfg != nil {
+			balanceMultiplier = s.cfg.Default.RateMultiplier
+		}
+		if balanceKey.GroupID != nil && balanceKey.Group != nil {
+			resolver := s.userGroupRateResolver
+			if resolver == nil {
+				resolver = newUserGroupRateResolver(nil, nil, resolveUserGroupRateCacheTTL(s.cfg), nil, "service.openai_gateway")
+			}
+			balanceMultiplier = resolver.Resolve(ctx, user.ID, *balanceKey.GroupID, balanceKey.Group.RateMultiplier)
+		}
+		balanceBaseMultiplier := balanceMultiplier
+		balanceMultiplier, balanceImageMultiplier := computePeakAwareMultipliers(balanceKey, balanceBaseMultiplier, timezone.Now())
+		balanceVideoMultiplier := resolveVideoRateMultiplier(balanceKey, balanceBaseMultiplier)
+		if balanceCost, balanceErr := s.calculateOpenAIRecordUsageCost(ctx, result, balanceKey, billingModels, balanceMultiplier, balanceImageMultiplier, balanceVideoMultiplier, balanceBaseMultiplier, tokens, serviceTier); balanceErr == nil && balanceCost != nil {
+			fallbackBalanceCost = balanceCost.ActualCost
+		}
+	}
 	billingType := BillingTypeBalance
 	if isSubscriptionBilling {
 		billingType = BillingTypeSubscription
@@ -309,15 +330,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		usageLog.SubscriptionID = &subscription.ID
 	}
 
-	// 计算账号统计定价费用（使用最终上游模型匹配自定义规则）
-	if apiKey.GroupID != nil {
-		applyAccountStatsCost(ctx, usageLog, s.channelService, s.billingService,
-			account.ID, *apiKey.GroupID, result.UpstreamModel, result.Model,
-			tokens, cost.TotalCost,
-		)
-	}
-
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+		applyFinalAccountStatsCost(ctx, usageLog, s.channelService, s.billingService,
+			account.ID, result.UpstreamModel, result.Model, tokens, cost.TotalCost)
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 		logger.LegacyPrintf("service.openai_gateway", "[SIMPLE MODE] Usage recorded (not billed): user=%d, tokens=%d", usageLog.UserID, usageLog.TotalTokens())
 		s.deferredService.ScheduleLastUsedUpdate(account.ID)
@@ -340,6 +355,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			Subscription:          subscription,
 			RequestPayloadHash:    resolveUsageBillingPayloadFingerprint(ctx, input.RequestPayloadHash),
 			IsSubscriptionBill:    isSubscriptionBilling,
+			FallbackBalanceCost:   fallbackBalanceCost,
 			AccountRateMultiplier: accountRateMultiplier,
 			APIKeyService:         input.APIKeyService,
 			Platform:              quotaPlatform,
@@ -350,6 +366,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if billingErr != nil {
 		return billingErr
 	}
+	applyFinalAccountStatsCost(ctx, usageLog, s.channelService, s.billingService,
+		account.ID, result.UpstreamModel, result.Model, tokens, cost.TotalCost)
 	writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 
 	return nil

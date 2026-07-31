@@ -313,6 +313,54 @@ func TestOpenAIGatewayServiceRecordUsage_ZeroUsageStillWritesUsageLog(t *testing
 	require.Zero(t, billingRepo.lastCmd.AccountQuotaCost)
 }
 
+func TestOpenAIGatewayServiceRecordUsage_AccountStatsUsesFinalBalanceGroup(t *testing.T) {
+	subscriptionGroupID := int64(930)
+	balanceGroupID := int64(940)
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{
+		Applied:          true,
+		FinalBillingType: BillingTypeBalance,
+		FinalGroupID:     i64p(balanceGroupID),
+		FinalCost:        0.25,
+	}}
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+	svc.channelService = newTestChannelServiceForStats(t, &Channel{
+		ID:                         1,
+		Status:                     StatusActive,
+		ApplyPricingToAccountStats: true,
+	}, balanceGroupID, PlatformOpenAI)
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: "openai_final_balance_group_stats",
+			Usage: OpenAIUsage{
+				InputTokens:  1000,
+				OutputTokens: 500,
+			},
+			Model:    "gpt-5.1",
+			Duration: time.Second,
+		},
+		APIKey: &APIKey{
+			ID:             1000,
+			GroupID:        i64p(subscriptionGroupID),
+			Group:          &Group{ID: subscriptionGroupID, SubscriptionType: SubscriptionTypeSubscription, RateMultiplier: 1},
+			BalanceGroupID: i64p(balanceGroupID),
+			BalanceGroup:   &Group{ID: balanceGroupID, SubscriptionType: SubscriptionTypeStandard, RateMultiplier: 1},
+		},
+		User:         &User{ID: 2000, Balance: 100},
+		Account:      &Account{ID: 3000},
+		Subscription: &UserSubscription{ID: 4000, UserID: 2000, GroupID: subscriptionGroupID},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Equal(t, BillingTypeBalance, usageRepo.lastLog.BillingType)
+	require.Equal(t, balanceGroupID, *usageRepo.lastLog.GroupID)
+	require.Nil(t, usageRepo.lastLog.SubscriptionID)
+	require.NotNil(t, usageRepo.lastLog.AccountStatsCost)
+	require.InDelta(t, usageRepo.lastLog.TotalCost, *usageRepo.lastLog.AccountStatsCost, 1e-12)
+}
+
 func TestOpenAIGatewayServiceRecordUsage_MissingPricingRecordsZeroCostUsageLog(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}

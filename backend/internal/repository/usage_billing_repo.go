@@ -172,14 +172,30 @@ func (r *usageBillingRepository) applyBatchImageBalanceHold(
 }
 
 func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand, result *service.UsageBillingApplyResult) error {
-	if cmd.SubscriptionCost > 0 && cmd.SubscriptionID != nil {
-		if err := incrementUsageBillingSubscription(ctx, tx, *cmd.SubscriptionID, cmd.SubscriptionCost); err != nil {
+	result.FinalBillingType = cmd.BillingType
+	result.FinalGroupID = cloneInt64Ptr(cmd.BalanceGroupID)
+	result.FinalSubscriptionID = nil
+	result.FinalCost = cmd.BalanceCost
+
+	balanceCost := cmd.BalanceCost
+	if cmd.BillingType == service.BillingTypeSubscription && cmd.SubscriptionID != nil && cmd.SubscriptionGroupID != nil {
+		applied, err := incrementUsageBillingSubscription(ctx, tx, cmd, result)
+		if err != nil {
 			return err
+		}
+		if applied {
+			balanceCost = 0
+		} else {
+			result.FinalBillingType = service.BillingTypeBalance
+			result.FinalGroupID = cloneInt64Ptr(cmd.BalanceGroupID)
+			result.FinalSubscriptionID = nil
+			balanceCost = cmd.FallbackBalanceCost
+			result.FinalCost = balanceCost
 		}
 	}
 
-	if cmd.BalanceCost > 0 {
-		newBalance, sufficient, err := deductUsageBillingBalance(ctx, tx, cmd.UserID, cmd.BalanceCost)
+	if balanceCost > 0 {
+		newBalance, sufficient, err := deductUsageBillingBalance(ctx, tx, cmd.UserID, balanceCost)
 		if err != nil {
 			return err
 		}
@@ -187,16 +203,27 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 		result.BalanceOverdrafted = !sufficient
 	}
 
-	if cmd.APIKeyQuotaCost > 0 {
-		exhausted, err := incrementUsageBillingAPIKeyQuota(ctx, tx, cmd.APIKeyID, cmd.APIKeyQuotaCost)
+	apiKeyQuotaCost := cmd.APIKeyQuotaCost
+	apiKeyRateLimitCost := cmd.APIKeyRateLimitCost
+	if cmd.BillingType == service.BillingTypeSubscription {
+		if apiKeyQuotaCost > 0 {
+			apiKeyQuotaCost = result.FinalCost
+		}
+		if apiKeyRateLimitCost > 0 {
+			apiKeyRateLimitCost = result.FinalCost
+		}
+	}
+
+	if apiKeyQuotaCost > 0 {
+		exhausted, err := incrementUsageBillingAPIKeyQuota(ctx, tx, cmd.APIKeyID, apiKeyQuotaCost)
 		if err != nil {
 			return err
 		}
 		result.APIKeyQuotaExhausted = exhausted
 	}
 
-	if cmd.APIKeyRateLimitCost > 0 {
-		if err := incrementUsageBillingAPIKeyRateLimit(ctx, tx, cmd.APIKeyID, cmd.APIKeyRateLimitCost); err != nil {
+	if apiKeyRateLimitCost > 0 {
+		if err := incrementUsageBillingAPIKeyRateLimit(ctx, tx, cmd.APIKeyID, apiKeyRateLimitCost); err != nil {
 			return err
 		}
 	}
@@ -212,32 +239,90 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 	return nil
 }
 
-func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscriptionID int64, costUSD float64) error {
+func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand, result *service.UsageBillingApplyResult) (bool, error) {
 	const updateSQL = `
 		UPDATE user_subscriptions us
 		SET
-			daily_usage_usd = us.daily_usage_usd + $1,
-			weekly_usage_usd = us.weekly_usage_usd + $1,
-			monthly_usage_usd = us.monthly_usage_usd + $1,
+			daily_usage_usd = CASE
+				WHEN us.daily_window_start IS NULL OR (
+					us.expires_at > us.starts_at + INTERVAL '1 day'
+					AND us.daily_window_start <= NOW() - INTERVAL '24 hours'
+				) THEN $1 ELSE us.daily_usage_usd + $1 END,
+			weekly_usage_usd = CASE
+				WHEN us.weekly_window_start IS NULL OR us.weekly_window_start <= NOW() - INTERVAL '7 days'
+				THEN $1 ELSE us.weekly_usage_usd + $1 END,
+			monthly_usage_usd = CASE
+				WHEN us.monthly_window_start IS NULL OR us.monthly_window_start <= NOW() - INTERVAL '30 days'
+				THEN $1 ELSE us.monthly_usage_usd + $1 END,
+			daily_window_start = CASE
+				WHEN us.daily_window_start IS NULL OR (
+					us.expires_at > us.starts_at + INTERVAL '1 day'
+					AND us.daily_window_start <= NOW() - INTERVAL '24 hours'
+				) THEN NOW() ELSE us.daily_window_start END,
+			weekly_window_start = CASE
+				WHEN us.weekly_window_start IS NULL OR us.weekly_window_start <= NOW() - INTERVAL '7 days'
+				THEN NOW() ELSE us.weekly_window_start END,
+			monthly_window_start = CASE
+				WHEN us.monthly_window_start IS NULL OR us.monthly_window_start <= NOW() - INTERVAL '30 days'
+				THEN NOW() ELSE us.monthly_window_start END,
+			monthly_bonus_usd = CASE
+				WHEN us.monthly_window_start IS NULL OR us.monthly_window_start <= NOW() - INTERVAL '30 days'
+				THEN 0 ELSE us.monthly_bonus_usd END,
 			updated_at = NOW()
 		FROM groups g
 		WHERE us.id = $2
+			AND us.user_id = $3
+			AND us.group_id = $4
 			AND us.deleted_at IS NULL
 			AND us.group_id = g.id
 			AND g.deleted_at IS NULL
+			AND us.status = 'active'
+			AND us.starts_at <= NOW()
+			AND us.expires_at > NOW()
+			AND g.status = 'active'
+			AND g.subscription_type = 'subscription'
+			AND (
+				g.daily_limit_usd IS NULL OR g.daily_limit_usd <= 0 OR
+				(CASE WHEN us.daily_window_start IS NULL OR (
+					us.expires_at > us.starts_at + INTERVAL '1 day'
+					AND us.daily_window_start <= NOW() - INTERVAL '24 hours'
+				) THEN 0 ELSE us.daily_usage_usd END) + $1 <= g.daily_limit_usd
+			)
+			AND (
+				g.weekly_limit_usd IS NULL OR g.weekly_limit_usd <= 0 OR
+				(CASE WHEN us.weekly_window_start IS NULL OR us.weekly_window_start <= NOW() - INTERVAL '7 days'
+					THEN 0 ELSE us.weekly_usage_usd END) + $1 <= g.weekly_limit_usd
+			)
+			AND (
+				g.monthly_limit_usd IS NULL OR g.monthly_limit_usd <= 0 OR
+				(CASE WHEN us.monthly_window_start IS NULL OR us.monthly_window_start <= NOW() - INTERVAL '30 days'
+					THEN 0 ELSE us.monthly_usage_usd END) + $1 <=
+				g.monthly_limit_usd + (CASE WHEN us.monthly_window_start IS NULL OR us.monthly_window_start <= NOW() - INTERVAL '30 days'
+					THEN 0 ELSE us.monthly_bonus_usd END)
+			)
+		RETURNING us.id, us.group_id
 	`
-	res, err := tx.ExecContext(ctx, updateSQL, costUSD, subscriptionID)
-	if err != nil {
-		return err
+	var subscriptionID, groupID int64
+	err := tx.QueryRowContext(ctx, updateSQL, cmd.SubscriptionCost, *cmd.SubscriptionID, cmd.UserID, *cmd.SubscriptionGroupID).Scan(&subscriptionID, &groupID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
 	}
-	affected, err := res.RowsAffected()
 	if err != nil {
-		return err
+		return false, err
 	}
-	if affected > 0 {
+	result.FinalBillingType = service.BillingTypeSubscription
+	result.FinalGroupID = &groupID
+	result.FinalSubscriptionID = &subscriptionID
+	result.FinalCost = cmd.SubscriptionCost
+	return true, nil
+}
+
+func cloneInt64Ptr(value *int64) *int64 {
+	if value == nil {
 		return nil
 	}
-	return service.ErrSubscriptionNotFound
+	copy := *value
+	return &copy
 }
 
 func deductUsageBillingBalance(ctx context.Context, tx *sql.Tx, userID int64, amount float64) (float64, bool, error) {

@@ -22,6 +22,8 @@ type UsageBillingCommand struct {
 	UserID              int64
 	AccountID           int64
 	SubscriptionID      *int64
+	SubscriptionGroupID *int64
+	BalanceGroupID      *int64
 	AccountType         string
 	Model               string
 	ServiceTier         string
@@ -36,6 +38,7 @@ type UsageBillingCommand struct {
 
 	BalanceCost         float64
 	SubscriptionCost    float64
+	FallbackBalanceCost float64
 	APIKeyQuotaCost     float64
 	APIKeyRateLimitCost float64
 	AccountQuotaCost    float64
@@ -56,7 +59,7 @@ func buildUsageBillingFingerprint(c *UsageBillingCommand) string {
 		return ""
 	}
 	raw := fmt.Sprintf(
-		"%d|%d|%d|%s|%s|%s|%s|%d|%d|%d|%d|%d|%d|%s|%d|%0.10f|%0.10f|%0.10f|%0.10f|%0.10f",
+		"%d|%d|%d|%s|%s|%s|%s|%d|%d|%d|%d|%d|%d|%s|%d|%d|%d|%0.10f|%0.10f|%0.10f|%0.10f|%0.10f|%0.10f",
 		c.UserID,
 		c.AccountID,
 		c.APIKeyID,
@@ -72,8 +75,11 @@ func buildUsageBillingFingerprint(c *UsageBillingCommand) string {
 		c.ImageCount,
 		strings.TrimSpace(c.MediaType),
 		valueOrZero(c.SubscriptionID),
+		valueOrZero(c.SubscriptionGroupID),
+		valueOrZero(c.BalanceGroupID),
 		c.BalanceCost,
 		c.SubscriptionCost,
+		c.FallbackBalanceCost,
 		c.APIKeyQuotaCost,
 		c.APIKeyRateLimitCost,
 		c.AccountQuotaCost,
@@ -113,6 +119,10 @@ type AccountQuotaState struct {
 
 type UsageBillingApplyResult struct {
 	Applied              bool
+	FinalBillingType     int8
+	FinalGroupID         *int64
+	FinalSubscriptionID  *int64
+	FinalCost            float64
 	APIKeyQuotaExhausted bool
 	NewBalance           *float64           // post-deduction balance (nil = no balance deduction)
 	BalanceOverdrafted   bool               // true when the sufficient-balance guard missed and debt was still recorded

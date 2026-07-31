@@ -756,7 +756,7 @@ func UserSubscriptionFromServiceAdmin(sub *service.UserSubscription) *AdminUserS
 }
 
 func userSubscriptionFromServiceBase(sub *service.UserSubscription) UserSubscription {
-	return UserSubscription{
+	out := UserSubscription{
 		ID:                 sub.ID,
 		UserID:             sub.UserID,
 		GroupID:            sub.GroupID,
@@ -769,12 +769,19 @@ func userSubscriptionFromServiceBase(sub *service.UserSubscription) UserSubscrip
 		DailyUsageUSD:      sub.DailyUsageUSD,
 		WeeklyUsageUSD:     sub.WeeklyUsageUSD,
 		MonthlyUsageUSD:    sub.MonthlyUsageUSD,
+		MonthlyBonusUSD:    sub.MonthlyBonusUSD,
+		RenewalEligible:    sub.RenewalEligible,
+		RenewalPrice:       sub.RenewalPrice,
 		CreatedAt:          sub.CreatedAt,
 		UpdatedAt:          sub.UpdatedAt,
 		RevokedAt:          sub.DeletedAt,
 		User:               UserFromServiceShallow(sub.User),
 		Group:              GroupFromServiceShallow(sub.Group),
 	}
+	if sub.Group != nil {
+		out.EffectiveMonthlyLimitUSD = sub.EffectiveMonthlyLimitUSD(sub.Group)
+	}
+	return out
 }
 
 func BulkAssignResultFromService(r *service.BulkAssignResult) *BulkAssignResult {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -45,6 +46,7 @@ type subscriptionCacheData struct {
 	DailyUsage   float64
 	WeeklyUsage  float64
 	MonthlyUsage float64
+	MonthlyBonus float64
 	Version      int64
 }
 
@@ -447,6 +449,7 @@ func (s *BillingCacheService) convertFromPortsData(data *SubscriptionCacheData) 
 		DailyUsage:   data.DailyUsage,
 		WeeklyUsage:  data.WeeklyUsage,
 		MonthlyUsage: data.MonthlyUsage,
+		MonthlyBonus: data.MonthlyBonus,
 		Version:      data.Version,
 	}
 }
@@ -458,6 +461,7 @@ func (s *BillingCacheService) convertToPortsData(data *subscriptionCacheData) *S
 		DailyUsage:   data.DailyUsage,
 		WeeklyUsage:  data.WeeklyUsage,
 		MonthlyUsage: data.MonthlyUsage,
+		MonthlyBonus: data.MonthlyBonus,
 		Version:      data.Version,
 	}
 }
@@ -475,6 +479,7 @@ func (s *BillingCacheService) getSubscriptionFromDB(ctx context.Context, userID,
 		DailyUsage:   sub.DailyUsageUSD,
 		WeeklyUsage:  sub.WeeklyUsageUSD,
 		MonthlyUsage: sub.MonthlyUsageUSD,
+		MonthlyBonus: sub.MonthlyBonusUSD,
 		Version:      sub.UpdatedAt.Unix(),
 	}, nil
 }
@@ -746,7 +751,19 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 
 	if isSubscriptionMode {
 		if err := s.checkSubscriptionEligibility(ctx, user.ID, group, subscription); err != nil {
-			return err
+			if !isSubscriptionFallbackError(err) || !hasBalanceFallbackRoute(apiKey) {
+				return err
+			}
+			if fallbackErr := s.checkBalanceEligibility(ctx, user.ID); fallbackErr != nil {
+				return fallbackErr
+			}
+			activateBalanceFallbackRoute(apiKey)
+			group = apiKey.Group
+			isSubscriptionMode = false
+		} else if hasBalanceFallbackRoute(apiKey) {
+			apiKey.setBalanceFallbackCheck(func(fallbackCtx context.Context) error {
+				return s.checkBalanceFallbackEligibility(fallbackCtx, user, apiKey, platform)
+			})
 		}
 	} else {
 		if err := s.checkBalanceEligibility(ctx, user.ID); err != nil {
@@ -776,6 +793,31 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 	return nil
 }
 
+func isSubscriptionFallbackError(err error) bool {
+	return errors.Is(err, ErrSubscriptionInvalid) ||
+		errors.Is(err, ErrDailyLimitExceeded) ||
+		errors.Is(err, ErrWeeklyLimitExceeded) ||
+		errors.Is(err, ErrMonthlyLimitExceeded)
+}
+
+func hasBalanceFallbackRoute(apiKey *APIKey) bool {
+	return apiKey != nil && apiKey.BalanceGroup != nil && apiKey.BalanceGroupID != nil && apiKey.GroupID != nil &&
+		*apiKey.BalanceGroupID != *apiKey.GroupID && apiKey.BalanceGroup.IsActive()
+}
+
+func (s *BillingCacheService) checkBalanceFallbackEligibility(ctx context.Context, user *User, apiKey *APIKey, platform string) error {
+	if user == nil || !hasBalanceFallbackRoute(apiKey) {
+		return ErrInsufficientBalance
+	}
+	if err := s.checkBalanceEligibility(ctx, user.ID); err != nil {
+		return err
+	}
+	if err := s.checkUserPlatformQuotaEligibility(ctx, user.ID, platform); err != nil {
+		return err
+	}
+	return s.checkGroupRPM(ctx, user, apiKey.BalanceGroup)
+}
+
 // checkRPM 执行并行 RPM 限流，所有适用的限制同时生效，任一超限即拒绝：
 //
 //  1. (用户, 分组) rpm_override       — 最细粒度：管理员为特定用户在特定分组设定的专属限额。
@@ -789,8 +831,16 @@ func (s *BillingCacheService) checkRPM(ctx context.Context, user *User, group *G
 	if s == nil || s.userRPMCache == nil || user == nil {
 		return nil
 	}
+	if err := s.checkGroupRPM(ctx, user, group); err != nil {
+		return err
+	}
+	return s.checkUserRPM(ctx, user)
+}
 
-	// ── 第一层：分组级检查（override 或 group.rpm_limit） ──
+func (s *BillingCacheService) checkGroupRPM(ctx context.Context, user *User, group *Group) error {
+	if s == nil || s.userRPMCache == nil || user == nil {
+		return nil
+	}
 	if group != nil {
 		// 解析 override：优先从 auth cache snapshot，nil 时回退 DB。
 		var override *int
@@ -840,8 +890,13 @@ func (s *BillingCacheService) checkRPM(ctx context.Context, user *User, group *G
 			}
 		}
 	}
+	return nil
+}
 
-	// ── 第二层：用户级全局硬上限（始终生效） ──
+func (s *BillingCacheService) checkUserRPM(ctx context.Context, user *User) error {
+	if s == nil || s.userRPMCache == nil || user == nil {
+		return nil
+	}
 	if user.RPMLimit > 0 {
 		count, err := s.userRPMCache.IncrementUserRPM(ctx, user.ID)
 		if err != nil {
@@ -930,7 +985,7 @@ func (s *BillingCacheService) checkSubscriptionEligibility(ctx context.Context, 
 		return ErrWeeklyLimitExceeded
 	}
 
-	if group.HasMonthlyLimit() && subData.MonthlyUsage >= *group.MonthlyLimitUSD {
+	if group.HasMonthlyLimit() && subData.MonthlyUsage >= *group.MonthlyLimitUSD+subData.MonthlyBonus {
 		return ErrMonthlyLimitExceeded
 	}
 

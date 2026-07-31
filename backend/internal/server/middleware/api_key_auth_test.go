@@ -27,9 +27,18 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 		ID:               42,
 		Name:             "sub",
 		Status:           service.StatusActive,
+		Platform:         service.PlatformAnthropic,
 		Hydrated:         true,
 		SubscriptionType: service.SubscriptionTypeSubscription,
 		DailyLimitUSD:    &limit,
+	}
+	balanceGroup := &service.Group{
+		ID:               43,
+		Name:             "balance",
+		Status:           service.StatusActive,
+		Platform:         service.PlatformAnthropic,
+		Hydrated:         true,
+		SubscriptionType: service.SubscriptionTypeStandard,
 	}
 	user := &service.User{
 		ID:          7,
@@ -44,9 +53,9 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 		Key:    "test-key",
 		Status: service.StatusActive,
 		User:   user,
-		Group:  group,
+		Group:  balanceGroup,
 	}
-	apiKey.GroupID = &group.ID
+	apiKey.GroupID = &balanceGroup.ID
 
 	apiKeyRepo := &stubApiKeyRepo{
 		getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
@@ -76,6 +85,7 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 			WeeklyWindowStart:  &past,
 			MonthlyWindowStart: &past,
 			DailyUsageUSD:      0,
+			Group:              group,
 		}
 		maintenanceCalled := make(chan struct{}, 1)
 		subscriptionRepo := &stubUserSubscriptionRepo{
@@ -83,7 +93,7 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 				clone := *sub
 				return &clone, nil
 			},
-			getActive: func(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
+			getActiveByUser: func(ctx context.Context, userID int64) (*service.UserSubscription, error) {
 				clone := *sub
 				return &clone, nil
 			},
@@ -139,6 +149,7 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 			WeeklyWindowStart:  &past,
 			MonthlyWindowStart: &past,
 			DailyUsageUSD:      10,
+			Group:              group,
 		}
 		fresh := *stale
 		fresh.DailyWindowStart = &current
@@ -147,7 +158,7 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 		fresh.DailyUsageUSD = 2
 
 		subscriptionRepo := &stubUserSubscriptionRepo{
-			getActive: func(context.Context, int64, int64) (*service.UserSubscription, error) {
+			getActiveByUser: func(context.Context, int64) (*service.UserSubscription, error) {
 				clone := *stale
 				return &clone, nil
 			},
@@ -167,7 +178,7 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 		req.Header.Set("x-api-key", apiKey.Key)
 		router.ServeHTTP(w, req)
 
-		require.Equal(t, http.StatusTooManyRequests, w.Code)
+		require.Equal(t, http.StatusOK, w.Code)
 	})
 
 	t.Run("simple_mode_bypasses_quota_check", func(t *testing.T) {
@@ -211,10 +222,11 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 			ExpiresAt:        now.Add(24 * time.Hour),
 			DailyWindowStart: &now,
 			DailyUsageUSD:    10,
+			Group:            group,
 		}
 		subscriptionRepo := &stubUserSubscriptionRepo{
-			getActive: func(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
-				if userID != sub.UserID || groupID != sub.GroupID {
+			getActiveByUser: func(ctx context.Context, userID int64) (*service.UserSubscription, error) {
+				if userID != sub.UserID {
 					return nil, service.ErrSubscriptionNotFound
 				}
 				clone := *sub
@@ -234,8 +246,7 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 		req.Header.Set("x-api-key", apiKey.Key)
 		router.ServeHTTP(w, req)
 
-		require.Equal(t, http.StatusTooManyRequests, w.Code)
-		require.Contains(t, w.Body.String(), "USAGE_LIMIT_EXCEEDED")
+		require.Equal(t, http.StatusOK, w.Code)
 	})
 }
 
@@ -1276,13 +1287,14 @@ func (r *stubApiKeyRepo) GetRateLimitData(ctx context.Context, id int64) (*servi
 }
 
 type stubUserSubscriptionRepo struct {
-	getByID        func(ctx context.Context, id int64) (*service.UserSubscription, error)
-	getActive      func(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error)
-	updateStatus   func(ctx context.Context, subscriptionID int64, status string) error
-	activateWindow func(ctx context.Context, id int64, start time.Time) error
-	resetDaily     func(ctx context.Context, id int64, start time.Time) error
-	resetWeekly    func(ctx context.Context, id int64, start time.Time) error
-	resetMonthly   func(ctx context.Context, id int64, start time.Time) error
+	getByID         func(ctx context.Context, id int64) (*service.UserSubscription, error)
+	getActive       func(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error)
+	getActiveByUser func(ctx context.Context, userID int64) (*service.UserSubscription, error)
+	updateStatus    func(ctx context.Context, subscriptionID int64, status string) error
+	activateWindow  func(ctx context.Context, id int64, start time.Time) error
+	resetDaily      func(ctx context.Context, id int64, start time.Time) error
+	resetWeekly     func(ctx context.Context, id int64, start time.Time) error
+	resetMonthly    func(ctx context.Context, id int64, start time.Time) error
 }
 
 type fakeSettingRepo struct {
@@ -1344,6 +1356,76 @@ func (r *stubUserSubscriptionRepo) GetActiveByUserIDAndGroupID(ctx context.Conte
 		return r.getActive(ctx, userID, groupID)
 	}
 	return nil, errors.New("not implemented")
+}
+
+func (r *stubUserSubscriptionRepo) GetActiveByUserID(ctx context.Context, userID int64) (*service.UserSubscription, error) {
+	if r.getActiveByUser != nil {
+		return r.getActiveByUser(ctx, userID)
+	}
+	return nil, service.ErrSubscriptionNotFound
+}
+
+func TestSelectSubscriptionBillingGroupUsesForcedRequestPlatform(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	balanceGroup := &service.Group{ID: 11, Status: service.StatusActive, Platform: service.PlatformAnthropic, SubscriptionType: service.SubscriptionTypeStandard}
+	subscriptionGroup := &service.Group{ID: 12, Status: service.StatusActive, Platform: service.PlatformAntigravity, SubscriptionType: service.SubscriptionTypeSubscription}
+	user := &service.User{ID: 42, Status: service.StatusActive, Balance: 10}
+	apiKey := &service.APIKey{ID: 7, UserID: user.ID, User: user, GroupID: &balanceGroup.ID, Group: balanceGroup}
+	now := time.Now()
+	subscription := &service.UserSubscription{
+		ID: 8, UserID: user.ID, GroupID: subscriptionGroup.ID, Group: subscriptionGroup,
+		Status: service.SubscriptionStatusActive, StartsAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour),
+		DailyWindowStart: &now, WeeklyWindowStart: &now, MonthlyWindowStart: &now,
+	}
+	repo := &stubUserSubscriptionRepo{getActiveByUser: func(context.Context, int64) (*service.UserSubscription, error) {
+		clone := *subscription
+		return &clone, nil
+	}}
+	svc := service.NewSubscriptionService(nil, repo, nil, nil, &config.Config{RunMode: config.RunModeStandard})
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	req = req.WithContext(context.WithValue(req.Context(), ctxkey.ForcePlatform, service.PlatformAntigravity))
+	c.Request = req
+
+	runtimeKey, selected, err := selectSubscriptionBillingGroup(c, apiKey, svc)
+
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	require.Equal(t, subscriptionGroup.ID, *runtimeKey.GroupID)
+}
+
+func TestSelectSubscriptionBillingGroupDoesNotReuseBalanceGroupRPMOverride(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	balanceGroup := &service.Group{ID: 11, Status: service.StatusActive, Platform: service.PlatformOpenAI, SubscriptionType: service.SubscriptionTypeStandard}
+	subscriptionGroup := &service.Group{ID: 12, Status: service.StatusActive, Platform: service.PlatformOpenAI, SubscriptionType: service.SubscriptionTypeSubscription}
+	balanceOverride := 3
+	user := &service.User{ID: 42, Status: service.StatusActive, Balance: 10, UserGroupRPMOverride: &balanceOverride}
+	apiKey := &service.APIKey{ID: 7, UserID: user.ID, User: user, GroupID: &balanceGroup.ID, Group: balanceGroup}
+	now := time.Now()
+	subscription := &service.UserSubscription{
+		ID: 8, UserID: user.ID, GroupID: subscriptionGroup.ID, Group: subscriptionGroup,
+		Status: service.SubscriptionStatusActive, StartsAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour),
+		DailyWindowStart: &now, WeeklyWindowStart: &now, MonthlyWindowStart: &now,
+	}
+	repo := &stubUserSubscriptionRepo{getActiveByUser: func(context.Context, int64) (*service.UserSubscription, error) {
+		clone := *subscription
+		return &clone, nil
+	}}
+	svc := service.NewSubscriptionService(nil, repo, nil, nil, &config.Config{RunMode: config.RunModeStandard})
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	runtimeKey, selected, err := selectSubscriptionBillingGroup(c, apiKey, svc)
+
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	require.NotSame(t, apiKey.User, runtimeKey.User)
+	require.Nil(t, runtimeKey.User.UserGroupRPMOverride)
+	require.Equal(t, &balanceOverride, apiKey.User.UserGroupRPMOverride, "the cached API key must remain unchanged")
 }
 
 func (r *stubUserSubscriptionRepo) Update(ctx context.Context, sub *service.UserSubscription) error {

@@ -238,3 +238,21 @@ func applyAccountStatsCost(
 		ctx, cs, bs, accountID, groupID, model, tokens, requestCount, totalCost,
 	)
 }
+
+// applyFinalAccountStatsCost resolves group-scoped account pricing only after
+// atomic settlement has selected the request's final billing group.
+func applyFinalAccountStatsCost(
+	ctx context.Context,
+	usageLog *UsageLog,
+	cs *ChannelService, bs *BillingService,
+	accountID int64,
+	upstreamModel, requestedModel string,
+	tokens UsageTokens,
+	totalCost float64,
+) {
+	if usageLog == nil || usageLog.GroupID == nil {
+		return
+	}
+	applyAccountStatsCost(ctx, usageLog, cs, bs, accountID, *usageLog.GroupID,
+		upstreamModel, requestedModel, tokens, totalCost)
+}

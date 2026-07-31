@@ -1,6 +1,8 @@
 package service
 
 import (
+	"context"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
@@ -45,7 +47,12 @@ type APIKey struct {
 	UpdatedAt           time.Time
 	User                *User
 	Group               *Group
-	CurrentConcurrency  int
+	// BalanceGroup keeps the API key's persisted group when a request is routed
+	// through the user's active subscription. These fields are runtime-only.
+	BalanceGroupID       *int64 `json:"-"`
+	BalanceGroup         *Group `json:"-"`
+	balanceFallbackCheck func(context.Context) error
+	CurrentConcurrency   int
 
 	// Quota fields
 	Quota     float64    // Quota limit in USD (0 = unlimited)
@@ -64,8 +71,39 @@ type APIKey struct {
 	Window7dStart *time.Time // Start of current 7d window
 }
 
+func (k *APIKey) setBalanceFallbackCheck(check func(context.Context) error) {
+	if k == nil || check == nil {
+		return
+	}
+	var once sync.Once
+	var result error
+	k.balanceFallbackCheck = func(ctx context.Context) error {
+		once.Do(func() { result = check(ctx) })
+		return result
+	}
+}
+
+func (k *APIKey) validateBalanceFallback(ctx context.Context) error {
+	if k == nil || k.balanceFallbackCheck == nil {
+		return nil
+	}
+	return k.balanceFallbackCheck(ctx)
+}
+
 func (k *APIKey) IsActive() bool {
 	return k.Status == StatusActive
+}
+
+// ForBalanceBilling returns a request-local copy restored to the API key's
+// persisted group. It is used only to calculate the balance fallback price.
+func (k *APIKey) ForBalanceBilling() *APIKey {
+	if k == nil || k.BalanceGroup == nil {
+		return k
+	}
+	copy := *k
+	copy.GroupID = k.BalanceGroupID
+	copy.Group = k.BalanceGroup
+	return &copy
 }
 
 // HasRateLimits returns true if any rate limit window is configured

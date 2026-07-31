@@ -1685,6 +1685,10 @@ export interface UserSubscription {
   daily_usage_usd: number
   weekly_usage_usd: number
   monthly_usage_usd: number
+  monthly_bonus_usd: number
+  effective_monthly_limit_usd: number
+  renewal_eligible: boolean
+  renewal_price: number | null
   daily_window_start: string | null
   weekly_window_start: string | null
   monthly_window_start: string | null
@@ -1716,6 +1720,8 @@ export interface SubscriptionProgress {
     percentage: number
     reset_in_seconds: number | null
   } | null
+  monthly_bonus_usd?: number
+  effective_monthly_limit_usd?: number | null
   expires_at: string | null
   days_remaining: number | null
 }

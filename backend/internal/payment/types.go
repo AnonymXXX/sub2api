@@ -43,6 +43,11 @@ const (
 	OrderTypeSubscription = "subscription"
 )
 
+const (
+	SubscriptionActionPurchase = "purchase"
+	SubscriptionActionRenewal  = "renewal"
+)
+
 // Entity statuses shared across users, groups, etc.
 const (
 	EntityStatusActive = "active"

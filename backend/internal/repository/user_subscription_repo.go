@@ -38,6 +38,7 @@ func (r *userSubscriptionRepository) Create(ctx context.Context, sub *service.Us
 		SetDailyUsageUsd(sub.DailyUsageUSD).
 		SetWeeklyUsageUsd(sub.WeeklyUsageUSD).
 		SetMonthlyUsageUsd(sub.MonthlyUsageUSD).
+		SetMonthlyBonusUsd(sub.MonthlyBonusUSD).
 		SetNillableAssignedBy(sub.AssignedBy)
 
 	if sub.StartsAt.IsZero() {
@@ -104,12 +105,14 @@ func (r *userSubscriptionRepository) GetByUserIDAndGroupID(ctx context.Context, 
 
 func (r *userSubscriptionRepository) GetActiveByUserIDAndGroupID(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
 	client := clientFromContext(ctx, r.client)
+	now := time.Now()
 	m, err := client.UserSubscription.Query().
 		Where(
 			usersubscription.UserIDEQ(userID),
 			usersubscription.GroupIDEQ(groupID),
 			usersubscription.StatusEQ(service.SubscriptionStatusActive),
-			usersubscription.ExpiresAtGT(time.Now()),
+			usersubscription.StartsAtLTE(now),
+			usersubscription.ExpiresAtGT(now),
 		).
 		WithGroup().
 		Only(ctx)
@@ -117,6 +120,30 @@ func (r *userSubscriptionRepository) GetActiveByUserIDAndGroupID(ctx context.Con
 		return nil, translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
 	}
 	return userSubscriptionEntityToService(m), nil
+}
+
+func (r *userSubscriptionRepository) GetActiveByUserID(ctx context.Context, userID int64) (*service.UserSubscription, error) {
+	client := clientFromContext(ctx, r.client)
+	now := time.Now()
+	m, err := client.UserSubscription.Query().
+		Where(
+			usersubscription.UserIDEQ(userID),
+			usersubscription.StatusEQ(service.SubscriptionStatusActive),
+			usersubscription.StartsAtLTE(now),
+			usersubscription.ExpiresAtGT(now),
+		).
+		WithGroup().
+		Only(ctx)
+	if err != nil {
+		return nil, translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+	}
+	return userSubscriptionEntityToService(m), nil
+}
+
+func (r *userSubscriptionRepository) LockUser(ctx context.Context, userID int64) error {
+	client := clientFromContext(ctx, r.client)
+	_, err := client.User.Query().Where(user.IDEQ(userID)).ForUpdate().Only(ctx)
+	return err
 }
 
 func (r *userSubscriptionRepository) Update(ctx context.Context, sub *service.UserSubscription) error {
@@ -137,6 +164,7 @@ func (r *userSubscriptionRepository) Update(ctx context.Context, sub *service.Us
 		SetDailyUsageUsd(sub.DailyUsageUSD).
 		SetWeeklyUsageUsd(sub.WeeklyUsageUSD).
 		SetMonthlyUsageUsd(sub.MonthlyUsageUSD).
+		SetMonthlyBonusUsd(sub.MonthlyBonusUSD).
 		SetNillableAssignedBy(sub.AssignedBy).
 		SetAssignedAt(sub.AssignedAt).
 		SetNotes(sub.Notes)
@@ -185,11 +213,13 @@ func (r *userSubscriptionRepository) ListByUserID(ctx context.Context, userID in
 
 func (r *userSubscriptionRepository) ListActiveByUserID(ctx context.Context, userID int64) ([]service.UserSubscription, error) {
 	client := clientFromContext(ctx, r.client)
+	now := time.Now()
 	subs, err := client.UserSubscription.Query().
 		Where(
 			usersubscription.UserIDEQ(userID),
 			usersubscription.StatusEQ(service.SubscriptionStatusActive),
-			usersubscription.ExpiresAtGT(time.Now()),
+			usersubscription.StartsAtLTE(now),
+			usersubscription.ExpiresAtGT(now),
 		).
 		WithGroup().
 		Order(dbent.Desc(usersubscription.FieldCreatedAt)).
@@ -248,6 +278,7 @@ func (r *userSubscriptionRepository) List(ctx context.Context, params pagination
 		// Active: status is active AND not yet expired
 		q = q.Where(
 			usersubscription.StatusEQ(service.SubscriptionStatusActive),
+			usersubscription.StartsAtLTE(now),
 			usersubscription.ExpiresAtGT(now),
 		)
 	case service.SubscriptionStatusExpired:
@@ -376,9 +407,17 @@ func (r *userSubscriptionRepository) ResetUsageWindows(ctx context.Context, id i
 		update.SetWeeklyUsageUsd(0).SetWeeklyWindowStart(newWindowStart)
 	}
 	if resetMonthly {
-		update.SetMonthlyUsageUsd(0).SetMonthlyWindowStart(newWindowStart)
+		update.SetMonthlyUsageUsd(0).SetMonthlyBonusUsd(0).SetMonthlyWindowStart(newWindowStart)
 	}
 	_, err := update.Save(ctx)
+	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+}
+
+func (r *userSubscriptionRepository) SetMonthlyBonus(ctx context.Context, id int64, amountUSD float64) error {
+	client := clientFromContext(ctx, r.client)
+	_, err := client.UserSubscription.UpdateOneID(id).
+		SetMonthlyBonusUsd(amountUSD).
+		Save(ctx)
 	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
 }
 
@@ -422,6 +461,7 @@ func (r *userSubscriptionRepository) ResetMonthlyUsage(ctx context.Context, id i
 	}
 	n, err := query.
 		SetMonthlyUsageUsd(0).
+		SetMonthlyBonusUsd(0).
 		SetMonthlyWindowStart(newWindowStart).
 		Save(ctx)
 	return r.translateConditionalWindowReset(ctx, client, id, n, err)
@@ -492,6 +532,7 @@ func (r *userSubscriptionRepository) BatchUpdateExpiredStatus(ctx context.Contex
 			usersubscription.ExpiresAtLTE(time.Now()),
 		).
 		SetStatus(service.SubscriptionStatusExpired).
+		SetMonthlyBonusUsd(0).
 		Save(ctx)
 	return int64(n), err
 }
@@ -520,11 +561,13 @@ func (r *userSubscriptionRepository) CountByGroupID(ctx context.Context, groupID
 
 func (r *userSubscriptionRepository) CountActiveByGroupID(ctx context.Context, groupID int64) (int64, error) {
 	client := clientFromContext(ctx, r.client)
+	now := time.Now()
 	count, err := client.UserSubscription.Query().
 		Where(
 			usersubscription.GroupIDEQ(groupID),
 			usersubscription.StatusEQ(service.SubscriptionStatusActive),
-			usersubscription.ExpiresAtGT(time.Now()),
+			usersubscription.StartsAtLTE(now),
+			usersubscription.ExpiresAtGT(now),
 		).
 		Count(ctx)
 	return int64(count), err
@@ -635,6 +678,7 @@ func userSubscriptionEntityToServiceWithStatusMapping(m *dbent.UserSubscription,
 		DailyUsageUSD:      m.DailyUsageUsd,
 		WeeklyUsageUSD:     m.WeeklyUsageUsd,
 		MonthlyUsageUSD:    m.MonthlyUsageUsd,
+		MonthlyBonusUSD:    m.MonthlyBonusUsd,
 		AssignedBy:         m.AssignedBy,
 		AssignedAt:         m.AssignedAt,
 		Notes:              derefString(m.Notes),

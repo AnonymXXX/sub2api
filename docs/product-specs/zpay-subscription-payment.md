@@ -18,7 +18,10 @@ The 30-day subscription catalog is:
 
 User ID 1 remains a self-use account whose cost is excluded from subscription
 profit calculations. Its original OpenAI group remains private to that user.
-Subscription groups do not fall back to account balance for API usage.
+The original no-balance-fallback rule is superseded by
+`docs/product-specs/single-subscription-auto-billing.md`: existing API keys now
+prefer the user's active subscription and fall back to their original key group
+and account balance whenever the subscription is not applicable.
 
 ## Payment Configuration
 
@@ -61,6 +64,9 @@ switch before rollback or investigation.
 - ZPAY's query-order endpoint is documented as GET. Recovery from delayed or
   missing callbacks depends on using that documented method.
 - Existing subscriptions keep their purchased terms when future prices change.
+- Subscription purchase, renewal, single-active-subscription, and automatic
+  balance-fallback rules are defined by
+  `docs/product-specs/single-subscription-auto-billing.md`.
 
 ## Status And Links
 

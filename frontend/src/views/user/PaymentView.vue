@@ -145,6 +145,10 @@
                   </div>
                 </div>
               </div>
+              <div v-if="isSelectedPlanRenewal" class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-800/60 dark:bg-amber-900/20 dark:text-amber-200">
+                <p class="font-semibold">{{ t('payment.renewalConfirmTitle') }}</p>
+                <p class="mt-1 leading-relaxed">{{ t('payment.renewalConfirmDescription') }}</p>
+              </div>
               <div v-if="enabledMethods.length >= 1" class="card p-6">
                 <PaymentMethodSelector
                   :methods="subMethodOptions"
@@ -682,6 +686,7 @@ const subMethodOptions = computed<PaymentMethodOption[]>(() => {
 
 const canSubmitSubscription = computed(() =>
   selectedPlan.value !== null
+    && canSelectPlan(selectedPlan.value)
     && amountFitsMethod(subTotalAmount.value, selectedMethod.value)
     && selectedLimit.value?.available !== false
 )
@@ -715,6 +720,10 @@ const renewalPlans = computed(() => {
   if (renewGroupId.value == null) return []
   return checkout.value.plans.filter(p => p.group_id === renewGroupId.value)
 })
+const currentActiveSubscription = computed(() => activeSubscriptions.value.find(sub => sub.status === 'active') ?? null)
+const isSelectedPlanRenewal = computed(() =>
+  selectedPlan.value !== null && currentActiveSubscription.value?.group_id === selectedPlan.value.group_id
+)
 
 const planValiditySuffix = computed(() => {
   if (!selectedPlan.value) return ''
@@ -732,12 +741,20 @@ function planPeakRateLabel(plan: SubscriptionPlan): string {
   return formatPeakRateWindow(plan, serverTimezoneLabel(appStore.cachedPublicSettings?.server_utc_offset))
 }
 
+function canSelectPlan(plan: SubscriptionPlan): boolean {
+  const active = currentActiveSubscription.value
+  if (!active) return true
+  return active.group_id === plan.group_id && active.renewal_eligible
+}
+
 function selectPlan(plan: SubscriptionPlan) {
+  if (!canSelectPlan(plan)) return
   selectedPlan.value = plan
   errorMessage.value = ''
 }
 
 function selectPlanFromModal(plan: SubscriptionPlan) {
+  if (!canSelectPlan(plan)) return
   showRenewalModal.value = false
   renewGroupId.value = null
   selectedPlan.value = plan
@@ -755,7 +772,7 @@ async function handleSubmitRecharge() {
 }
 
 async function confirmSubscribe() {
-  if (!selectedPlan.value || submitting.value) return
+  if (!selectedPlan.value || !canSelectPlan(selectedPlan.value) || submitting.value) return
   await createOrder(selectedPlan.value.price, 'subscription', selectedPlan.value.id)
 }
 
@@ -1093,6 +1110,7 @@ onMounted(async () => {
   try {
     const res = await paymentAPI.getCheckoutInfo()
     checkout.value = res.data
+    await subscriptionStore.fetchActiveSubscriptions()
     if (enabledMethods.value.length) {
       const order: readonly string[] = METHOD_ORDER
       const sorted = [...enabledMethods.value].sort((a, b) => {
@@ -1138,7 +1156,7 @@ onMounted(async () => {
         const groupId = Number(route.query.group)
         const groupPlans = checkout.value.plans.filter(p => p.group_id === groupId)
         if (groupPlans.length === 1) {
-          selectedPlan.value = groupPlans[0]
+          selectPlan(groupPlans[0])
         } else if (groupPlans.length > 1) {
           renewGroupId.value = groupId
           showRenewalModal.value = true
@@ -1147,7 +1165,5 @@ onMounted(async () => {
     }
   } catch (err: unknown) { appStore.showError(extractI18nErrorMessage(err, t, 'payment.errors', t('common.error'))) }
   finally { loading.value = false }
-  // Fetch active subscriptions (uses cache, non-blocking)
-  subscriptionStore.fetchActiveSubscriptions().catch(() => {})
 })
 </script>

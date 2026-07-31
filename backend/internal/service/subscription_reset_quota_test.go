@@ -21,6 +21,7 @@ type resetQuotaUserSubRepoStub struct {
 	resetDailyCalled   bool
 	resetWeeklyCalled  bool
 	resetMonthlyCalled bool
+	lastWindowStart    time.Time
 	resetDailyErr      error
 	resetWeeklyErr     error
 	resetMonthlyErr    error
@@ -38,6 +39,7 @@ func (r *resetQuotaUserSubRepoStub) ResetUsageWindows(_ context.Context, _ int64
 	r.resetDailyCalled = resetDaily
 	r.resetWeeklyCalled = resetWeekly
 	r.resetMonthlyCalled = resetMonthly
+	r.lastWindowStart = windowStart
 	if resetDaily && r.resetDailyErr != nil {
 		return r.resetDailyErr
 	}
@@ -60,6 +62,7 @@ func (r *resetQuotaUserSubRepoStub) ResetUsageWindows(_ context.Context, _ int64
 	}
 	if resetMonthly {
 		r.sub.MonthlyUsageUSD = 0
+		r.sub.MonthlyBonusUSD = 0
 		r.sub.MonthlyWindowStart = &windowStart
 	}
 	return nil
@@ -109,13 +112,17 @@ func TestAdminResetQuota_ResetDailyOnly(t *testing.T) {
 	}
 	svc := newResetQuotaSvc(stub)
 
+	before := time.Now()
 	result, err := svc.AdminResetQuota(context.Background(), 2, true, false, false)
+	after := time.Now()
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.True(t, stub.resetDailyCalled, "应调用 ResetDailyUsage")
 	require.False(t, stub.resetWeeklyCalled, "不应调用 ResetWeeklyUsage")
 	require.False(t, stub.resetMonthlyCalled, "不应调用 ResetMonthlyUsage")
+	require.False(t, stub.lastWindowStart.Before(before), "新窗口应从管理员操作时间开始")
+	require.False(t, stub.lastWindowStart.After(after), "新窗口不应晚于操作完成时间")
 }
 
 func TestAdminResetQuota_ResetWeeklyOnly(t *testing.T) {
@@ -190,7 +197,7 @@ func TestAdminResetQuota_ResetWeeklyUsageError(t *testing.T) {
 
 func TestAdminResetQuota_ResetMonthlyOnly(t *testing.T) {
 	stub := &resetQuotaUserSubRepoStub{
-		sub: &UserSubscription{ID: 8, UserID: 10, GroupID: 20},
+		sub: &UserSubscription{ID: 8, UserID: 10, GroupID: 20, MonthlyBonusUSD: 50},
 	}
 	svc := newResetQuotaSvc(stub)
 
@@ -201,6 +208,7 @@ func TestAdminResetQuota_ResetMonthlyOnly(t *testing.T) {
 	require.False(t, stub.resetDailyCalled, "不应调用 ResetDailyUsage")
 	require.False(t, stub.resetWeeklyCalled, "不应调用 ResetWeeklyUsage")
 	require.True(t, stub.resetMonthlyCalled, "应调用 ResetMonthlyUsage")
+	require.Zero(t, result.MonthlyBonusUSD, "月重置必须清除临时额度")
 }
 
 func TestAdminResetQuota_ResetMonthlyUsageError(t *testing.T) {

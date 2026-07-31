@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"math"
 	"strconv"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
@@ -224,6 +225,10 @@ type ResetSubscriptionQuotaRequest struct {
 	Monthly bool `json:"monthly"`
 }
 
+type SetMonthlyBonusRequest struct {
+	AmountUSD float64 `json:"amount_usd"`
+}
+
 // ResetQuota resets daily, weekly, and/or monthly usage for a subscription.
 // POST /api/v1/admin/subscriptions/:id/reset-quota
 func (h *SubscriptionHandler) ResetQuota(c *gin.Context) {
@@ -241,12 +246,43 @@ func (h *SubscriptionHandler) ResetQuota(c *gin.Context) {
 		response.BadRequest(c, "At least one of 'daily', 'weekly', or 'monthly' must be true")
 		return
 	}
-	sub, err := h.subscriptionService.AdminResetQuota(c.Request.Context(), subscriptionID, req.Daily, req.Weekly, req.Monthly)
+	payload := struct {
+		SubscriptionID int64                         `json:"subscription_id"`
+		Body           ResetSubscriptionQuotaRequest `json:"body"`
+	}{SubscriptionID: subscriptionID, Body: req}
+	executeAdminIdempotentJSON(c, "admin.subscriptions.reset_quota", payload, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
+		sub, execErr := h.subscriptionService.AdminResetQuota(ctx, subscriptionID, req.Daily, req.Weekly, req.Monthly)
+		if execErr != nil {
+			return nil, execErr
+		}
+		return dto.UserSubscriptionFromServiceAdmin(sub), nil
+	})
+}
+
+// SetMonthlyBonus replaces the temporary quota for the current monthly window.
+// PUT /api/v1/admin/subscriptions/:id/monthly-bonus
+func (h *SubscriptionHandler) SetMonthlyBonus(c *gin.Context) {
+	subscriptionID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		response.ErrorFrom(c, err)
+		response.BadRequest(c, "Invalid subscription ID")
 		return
 	}
-	response.Success(c, dto.UserSubscriptionFromServiceAdmin(sub))
+	var req SetMonthlyBonusRequest
+	if err := c.ShouldBindJSON(&req); err != nil || math.IsNaN(req.AmountUSD) || math.IsInf(req.AmountUSD, 0) || req.AmountUSD < 0 {
+		response.BadRequest(c, "amount_usd must be a finite non-negative number")
+		return
+	}
+	payload := struct {
+		SubscriptionID int64                  `json:"subscription_id"`
+		Body           SetMonthlyBonusRequest `json:"body"`
+	}{SubscriptionID: subscriptionID, Body: req}
+	executeAdminIdempotentJSON(c, "admin.subscriptions.monthly_bonus", payload, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
+		sub, execErr := h.subscriptionService.AdminSetMonthlyBonus(ctx, subscriptionID, req.AmountUSD)
+		if execErr != nil {
+			return nil, execErr
+		}
+		return dto.UserSubscriptionFromServiceAdmin(sub), nil
+	})
 }
 
 // Revoke handles revoking a subscription.

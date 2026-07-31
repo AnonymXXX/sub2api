@@ -482,6 +482,8 @@ type PublicOrderResult struct {
 	RefundRequestedBy   *string    `json:"refund_requested_by,omitempty"`
 	RefundRequestReason *string    `json:"refund_request_reason,omitempty"`
 	PlanID              *int64     `json:"plan_id,omitempty"`
+	SubscriptionAction  *string    `json:"subscription_action,omitempty"`
+	SubscriptionID      *int64     `json:"subscription_id,omitempty"`
 }
 
 // PublicOrderVerifyResult is returned by the legacy anonymous out_trade_no
@@ -517,6 +519,8 @@ func buildPublicOrderResult(order *dbent.PaymentOrder) PublicOrderResult {
 		RefundRequestedBy:   order.RefundRequestedBy,
 		RefundRequestReason: order.RefundRequestReason,
 		PlanID:              order.PlanID,
+		SubscriptionAction:  order.SubscriptionAction,
+		SubscriptionID:      order.SubscriptionID,
 	}
 }
 
@@ -626,6 +630,8 @@ type PaymentOrderResult struct {
 	RefundRequestedBy   *string    `json:"refund_requested_by,omitempty"`
 	RefundRequestReason *string    `json:"refund_request_reason,omitempty"`
 	PlanID              *int64     `json:"plan_id,omitempty"`
+	SubscriptionAction  *string    `json:"subscription_action,omitempty"`
+	SubscriptionID      *int64     `json:"subscription_id,omitempty"`
 	ProviderInstanceID  *string    `json:"provider_instance_id,omitempty"`
 }
 
@@ -664,6 +670,8 @@ func sanitizePaymentOrderForResponse(order *dbent.PaymentOrder) *PaymentOrderRes
 		RefundRequestedBy:   order.RefundRequestedBy,
 		RefundRequestReason: order.RefundRequestReason,
 		PlanID:              order.PlanID,
+		SubscriptionAction:  order.SubscriptionAction,
+		SubscriptionID:      order.SubscriptionID,
 		ProviderInstanceID:  order.ProviderInstanceID,
 	}
 }

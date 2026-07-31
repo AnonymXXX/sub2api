@@ -571,6 +571,26 @@ func resolveOpenAIAccountUpstreamModelForRequest(account *Account, requestedMode
 }
 
 func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, stickyAccountID int64, requiredCapability OpenAIEndpointCapability) (*Account, error) {
+	account, err := s.selectAccountForModelWithExclusionsInGroup(ctx, groupID, platform, sessionHash, requestedModel, excludedIDs, requireCompact, stickyAccountID, requiredCapability)
+	if err == nil {
+		return account, nil
+	}
+	apiKey, fallbackGroupID, ok := balanceFallbackRoute(ctx, groupID)
+	if !ok {
+		return nil, err
+	}
+	fallbackAccount, fallbackErr := s.selectAccountForModelWithExclusionsInGroup(ctx, fallbackGroupID, platform, sessionHash, requestedModel, excludedIDs, requireCompact, stickyAccountID, requiredCapability)
+	if fallbackErr != nil {
+		return nil, err
+	}
+	if fallbackErr := validateBalanceFallbackRoute(ctx, apiKey); fallbackErr != nil {
+		return nil, fallbackErr
+	}
+	activateBalanceFallbackRoute(apiKey)
+	return fallbackAccount, nil
+}
+
+func (s *OpenAIGatewayService) selectAccountForModelWithExclusionsInGroup(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, stickyAccountID int64, requiredCapability OpenAIEndpointCapability) (*Account, error) {
 	platform = normalizeOpenAICompatiblePlatform(platform)
 	if s.checkChannelPricingRestriction(ctx, groupID, requestedModel) {
 		slog.Warn("channel pricing restriction blocked request",

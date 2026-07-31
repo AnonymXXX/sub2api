@@ -18,6 +18,9 @@ type UserSubscription struct {
 	DailyUsageUSD   float64
 	WeeklyUsageUSD  float64
 	MonthlyUsageUSD float64
+	MonthlyBonusUSD float64
+	RenewalEligible bool
+	RenewalPrice    *float64
 
 	AssignedBy *int64
 	AssignedAt time.Time
@@ -33,7 +36,13 @@ type UserSubscription struct {
 }
 
 func (s *UserSubscription) IsActive() bool {
-	return s.Status == SubscriptionStatusActive && time.Now().Before(s.ExpiresAt)
+	if s == nil {
+		return false
+	}
+	now := time.Now()
+	return s.Status == SubscriptionStatusActive &&
+		(s.StartsAt.IsZero() || !now.Before(s.StartsAt)) &&
+		now.Before(s.ExpiresAt)
 }
 
 func (s *UserSubscription) IsExpired() bool {
@@ -132,7 +141,21 @@ func (s *UserSubscription) CheckMonthlyLimit(group *Group, additionalCost float6
 	if !group.HasMonthlyLimit() {
 		return true
 	}
-	return s.MonthlyUsageUSD+additionalCost <= *group.MonthlyLimitUSD
+	return s.MonthlyUsageUSD+additionalCost <= s.EffectiveMonthlyLimitUSD(group)
+}
+
+func (s *UserSubscription) EffectiveMonthlyLimitUSD(group *Group) float64 {
+	if group == nil || !group.HasMonthlyLimit() {
+		return 0
+	}
+	return *group.MonthlyLimitUSD + s.MonthlyBonusUSD
+}
+
+func (s *UserSubscription) IsRenewalEligible(group *Group) bool {
+	if s == nil || group == nil || !s.IsActive() || !group.HasMonthlyLimit() {
+		return false
+	}
+	return s.MonthlyUsageUSD >= s.EffectiveMonthlyLimitUSD(group)
 }
 
 func (s *UserSubscription) CheckAllLimits(group *Group, additionalCost float64) (daily, weekly, monthly bool) {

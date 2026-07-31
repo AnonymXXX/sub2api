@@ -148,6 +148,18 @@ export async function resetQuota(
   return data
 }
 
+/** Replace the temporary quota for the current monthly window. */
+export async function setMonthlyBonus(
+  id: number,
+  request: { amount_usd: number }
+): Promise<UserSubscription> {
+  const { data } = await apiClient.put<UserSubscription>(
+    `/admin/subscriptions/${id}/monthly-bonus`,
+    request
+  )
+  return data
+}
+
 /**
  * List subscriptions by group
  * @param groupId - Group ID
@@ -200,6 +212,7 @@ export const subscriptionsAPI = {
   revoke,
   restore,
   resetQuota,
+  setMonthlyBonus,
   listByGroup,
   listByUser
 }

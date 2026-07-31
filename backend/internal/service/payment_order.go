@@ -145,6 +145,21 @@ func (s *PaymentService) validateSubOrder(ctx context.Context, req CreateOrderRe
 	if !group.IsSubscriptionType() {
 		return nil, infraerrors.BadRequest("GROUP_TYPE_MISMATCH", "group is not a subscription type")
 	}
+	if s.subscriptionSvc == nil {
+		return nil, infraerrors.ServiceUnavailable("SUBSCRIPTION_UNAVAILABLE", "subscription service is unavailable")
+	}
+	active, activeErr := s.subscriptionSvc.GetActiveUserSubscription(ctx, req.UserID)
+	if activeErr != nil && !errors.Is(activeErr, ErrSubscriptionNotFound) {
+		return nil, activeErr
+	}
+	if active != nil {
+		if active.GroupID != plan.GroupID {
+			return nil, infraerrors.Conflict("ACTIVE_SUBSCRIPTION_EXISTS", "current subscription must expire before choosing another plan")
+		}
+		if active.NeedsMonthlyReset() || !active.IsRenewalEligible(group) {
+			return nil, infraerrors.Conflict("RENEWAL_NOT_ELIGIBLE", "current monthly quota must be exhausted before renewal")
+		}
+	}
 	return plan, nil
 }
 
@@ -154,6 +169,15 @@ func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderReq
 		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	txCtx := dbent.NewTxContext(ctx, tx)
+	subscriptionAction := ""
+	var targetSubscriptionID *int64
+	if plan != nil {
+		subscriptionAction, targetSubscriptionID, err = s.resolveSubscriptionOrderAction(txCtx, req.UserID, plan)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if err := s.checkPendingLimit(ctx, tx, req.UserID, cfg.MaxPendingOrders); err != nil {
 		return nil, err
 	}
@@ -206,7 +230,11 @@ func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderReq
 		b.SetProviderSnapshot(providerSnapshot)
 	}
 	if plan != nil {
-		b.SetPlanID(plan.ID).SetSubscriptionGroupID(plan.GroupID).SetSubscriptionDays(psComputeValidityDays(plan.ValidityDays, plan.ValidityUnit))
+		b.SetPlanID(plan.ID).
+			SetSubscriptionGroupID(plan.GroupID).
+			SetSubscriptionDays(psComputeValidityDays(plan.ValidityDays, plan.ValidityUnit)).
+			SetSubscriptionAction(subscriptionAction).
+			SetNillableSubscriptionID(targetSubscriptionID)
 	}
 	order, err := b.Save(ctx)
 	if err != nil {
@@ -221,6 +249,39 @@ func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderReq
 		return nil, fmt.Errorf("commit order transaction: %w", err)
 	}
 	return order, nil
+}
+
+func (s *PaymentService) resolveSubscriptionOrderAction(ctx context.Context, userID int64, plan *dbent.SubscriptionPlan) (string, *int64, error) {
+	if plan == nil || s.subscriptionSvc == nil {
+		return "", nil, infraerrors.ServiceUnavailable("SUBSCRIPTION_UNAVAILABLE", "subscription service is unavailable")
+	}
+	if locker, ok := s.subscriptionSvc.userSubRepo.(subscriptionUserLocker); ok {
+		if err := locker.LockUser(ctx, userID); err != nil {
+			return "", nil, fmt.Errorf("lock subscription user: %w", err)
+		}
+	}
+	active, err := s.subscriptionSvc.getActiveSubscriptionByUser(ctx, userID)
+	if err != nil {
+		return "", nil, err
+	}
+	if active == nil {
+		return payment.SubscriptionActionPurchase, nil, nil
+	}
+	if active.GroupID != plan.GroupID {
+		return "", nil, infraerrors.Conflict("ACTIVE_SUBSCRIPTION_EXISTS", "current subscription must expire before choosing another plan")
+	}
+	group := active.Group
+	if group == nil {
+		group, err = s.groupRepo.GetByID(ctx, active.GroupID)
+		if err != nil {
+			return "", nil, fmt.Errorf("get subscription group: %w", err)
+		}
+	}
+	if active.NeedsMonthlyReset() || !active.IsRenewalEligible(group) {
+		return "", nil, infraerrors.Conflict("RENEWAL_NOT_ELIGIBLE", "current monthly quota must be exhausted before renewal")
+	}
+	subscriptionID := active.ID
+	return payment.SubscriptionActionRenewal, &subscriptionID, nil
 }
 
 func (s *PaymentService) allocateOutTradeNo(ctx context.Context, tx *dbent.Tx) (string, error) {

@@ -71,7 +71,7 @@
                 {{ t(`userSubscriptions.status.${subscription.status}`) }}
               </span>
               <button
-                v-if="subscription.status === 'active'"
+                v-if="subscription.status === 'active' && subscription.renewal_eligible"
                 :class="['rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-colors', platformButtonClass(subscription.group?.platform || '')]"
                 @click="router.push({ path: '/purchase', query: { tab: 'subscription', group: String(subscription.group_id) } })"
               >
@@ -179,14 +179,14 @@
             </div>
 
             <!-- Monthly Usage -->
-            <div v-if="subscription.group?.monthly_limit_usd" class="space-y-2">
+            <div v-if="effectiveMonthlyLimit(subscription) > 0" class="space-y-2">
               <div class="flex items-center justify-between">
                 <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
                   {{ t('userSubscriptions.monthly') }}
                 </span>
                 <span class="text-sm text-gray-500 dark:text-dark-400">
                   ${{ (subscription.monthly_usage_usd || 0).toFixed(2) }} / ${{
-                    subscription.group.monthly_limit_usd.toFixed(2)
+                    effectiveMonthlyLimit(subscription).toFixed(2)
                   }}
                 </span>
               </div>
@@ -196,13 +196,13 @@
                   :class="
                     getProgressBarClass(
                       subscription.monthly_usage_usd,
-                      subscription.group.monthly_limit_usd
+                      effectiveMonthlyLimit(subscription)
                     )
                   "
                   :style="{
                     width: getProgressWidth(
                       subscription.monthly_usage_usd,
-                      subscription.group.monthly_limit_usd
+                      effectiveMonthlyLimit(subscription)
                     )
                   }"
                 ></div>
@@ -217,6 +217,20 @@
                   })
                 }}
               </p>
+              <div class="grid grid-cols-3 gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs dark:bg-dark-700/50">
+                <div>
+                  <span class="block text-gray-400 dark:text-dark-500">{{ t('userSubscriptions.baseMonthlyLimit') }}</span>
+                  <span class="font-medium text-gray-700 dark:text-gray-300">${{ baseMonthlyLimit(subscription).toFixed(2) }}</span>
+                </div>
+                <div>
+                  <span class="block text-gray-400 dark:text-dark-500">{{ t('userSubscriptions.monthlyBonus') }}</span>
+                  <span class="font-medium text-gray-700 dark:text-gray-300">${{ (subscription.monthly_bonus_usd || 0).toFixed(2) }}</span>
+                </div>
+                <div>
+                  <span class="block text-gray-400 dark:text-dark-500">{{ t('userSubscriptions.effectiveMonthlyLimit') }}</span>
+                  <span class="font-medium text-gray-700 dark:text-gray-300">${{ effectiveMonthlyLimit(subscription).toFixed(2) }}</span>
+                </div>
+              </div>
             </div>
 
             <!-- No limits configured - Unlimited badge -->
@@ -284,6 +298,14 @@ function subscriptionHasPeakRate(subscription: UserSubscription): boolean {
 
 function subscriptionPeakRateLabel(subscription: UserSubscription): string {
   return formatPeakRateWindow(subscription.group, serverTimezoneLabel(appStore.cachedPublicSettings?.server_utc_offset))
+}
+
+function baseMonthlyLimit(subscription: UserSubscription): number {
+  return subscription.group?.monthly_limit_usd ?? 0
+}
+
+function effectiveMonthlyLimit(subscription: UserSubscription): number {
+  return subscription.effective_monthly_limit_usd || baseMonthlyLimit(subscription)
 }
 
 async function loadSubscriptions() {

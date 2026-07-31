@@ -71,6 +71,8 @@ func (SubscriptionPlan) Fields() []ent.Field {
 
 func (SubscriptionPlan) Indexes() []ent.Index {
 	return []ent.Index{
+		// The partial unique index that permits disabled historical plans is managed
+		// by migration 175_single_subscription_auto_billing.sql.
 		index.Fields("group_id"),
 		index.Fields("for_sale"),
 	}

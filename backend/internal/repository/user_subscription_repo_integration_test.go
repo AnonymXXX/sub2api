@@ -239,6 +239,19 @@ func (s *UserSubscriptionRepoSuite) TestGetActiveByUserIDAndGroupID_ExpiredIgnor
 	s.Require().Error(err, "expected error for expired subscription")
 }
 
+func (s *UserSubscriptionRepoSuite) TestGetActiveByUserIDAndGroupID_FutureIgnored() {
+	user := s.mustCreateUser("future@test.com", service.RoleUser)
+	group := s.mustCreateGroup("g-future")
+
+	s.mustCreateSubscription(user.ID, group.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetStartsAt(time.Now().Add(2 * time.Hour))
+		c.SetExpiresAt(time.Now().Add(32 * 24 * time.Hour))
+	})
+
+	_, err := s.repo.GetActiveByUserIDAndGroupID(s.ctx, user.ID, group.ID)
+	s.Require().Error(err, "expected error for subscription that has not started")
+}
+
 // --- ListByUserID / ListActiveByUserID ---
 
 func (s *UserSubscriptionRepoSuite) TestListByUserID() {
@@ -277,6 +290,20 @@ func (s *UserSubscriptionRepoSuite) TestListActiveByUserID() {
 	s.Require().NoError(err, "ListActiveByUserID")
 	s.Require().Len(subs, 1)
 	s.Require().Equal(service.SubscriptionStatusActive, subs[0].Status)
+}
+
+func (s *UserSubscriptionRepoSuite) TestListActiveByUserID_FutureIgnored() {
+	user := s.mustCreateUser("listfuture@test.com", service.RoleUser)
+	group := s.mustCreateGroup("g-listfuture")
+
+	s.mustCreateSubscription(user.ID, group.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetStartsAt(time.Now().Add(2 * time.Hour))
+		c.SetExpiresAt(time.Now().Add(32 * 24 * time.Hour))
+	})
+
+	subs, err := s.repo.ListActiveByUserID(s.ctx, user.ID)
+	s.Require().NoError(err, "ListActiveByUserID")
+	s.Require().Empty(subs)
 }
 
 // --- ListByGroupID ---
@@ -633,6 +660,7 @@ func (s *UserSubscriptionRepoSuite) TestBatchUpdateExpiredStatus() {
 	})
 	expiredActive := s.mustCreateSubscription(user.ID, groupPast.ID, func(c *dbent.UserSubscriptionCreate) {
 		c.SetExpiresAt(time.Now().Add(-24 * time.Hour))
+		c.SetMonthlyBonusUsd(25)
 	})
 
 	affected, err := s.repo.BatchUpdateExpiredStatus(s.ctx)
@@ -644,6 +672,7 @@ func (s *UserSubscriptionRepoSuite) TestBatchUpdateExpiredStatus() {
 
 	gotExpired, _ := s.repo.GetByID(s.ctx, expiredActive.ID)
 	s.Require().Equal(service.SubscriptionStatusExpired, gotExpired.Status)
+	s.Require().Zero(gotExpired.MonthlyBonusUSD)
 }
 
 // --- ExistsByUserIDAndGroupID ---

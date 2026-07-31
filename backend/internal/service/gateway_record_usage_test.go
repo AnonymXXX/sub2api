@@ -167,6 +167,54 @@ func TestGatewayServiceRecordUsage_BillingFingerprintFallsBackToContextRequestID
 	require.Equal(t, "local:req-local-123", billingRepo.lastCmd.RequestPayloadHash)
 }
 
+func TestGatewayServiceRecordUsage_AccountStatsUsesFinalBalanceGroup(t *testing.T) {
+	subscriptionGroupID := int64(910)
+	balanceGroupID := int64(920)
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{
+		Applied:          true,
+		FinalBillingType: BillingTypeBalance,
+		FinalGroupID:     i64p(balanceGroupID),
+		FinalCost:        0.25,
+	}}
+	svc := newGatewayRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
+	svc.channelService = newTestChannelServiceForStats(t, &Channel{
+		ID:                         1,
+		Status:                     StatusActive,
+		ApplyPricingToAccountStats: true,
+	}, balanceGroupID, PlatformAnthropic)
+
+	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID: "gateway_final_balance_group_stats",
+			Usage: ClaudeUsage{
+				InputTokens:  1000,
+				OutputTokens: 500,
+			},
+			Model:    "claude-sonnet-4",
+			Duration: time.Second,
+		},
+		APIKey: &APIKey{
+			ID:             501,
+			GroupID:        i64p(subscriptionGroupID),
+			Group:          &Group{ID: subscriptionGroupID, SubscriptionType: SubscriptionTypeSubscription, RateMultiplier: 1},
+			BalanceGroupID: i64p(balanceGroupID),
+			BalanceGroup:   &Group{ID: balanceGroupID, SubscriptionType: SubscriptionTypeStandard, RateMultiplier: 1},
+		},
+		User:         &User{ID: 601, Balance: 100},
+		Account:      &Account{ID: 701},
+		Subscription: &UserSubscription{ID: 801, UserID: 601, GroupID: subscriptionGroupID},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Equal(t, BillingTypeBalance, usageRepo.lastLog.BillingType)
+	require.Equal(t, balanceGroupID, *usageRepo.lastLog.GroupID)
+	require.Nil(t, usageRepo.lastLog.SubscriptionID)
+	require.NotNil(t, usageRepo.lastLog.AccountStatsCost)
+	require.InDelta(t, usageRepo.lastLog.TotalCost, *usageRepo.lastLog.AccountStatsCost, 1e-12)
+}
+
 func TestGatewayServiceRecordUsage_PreservesRequestedAndUpstreamModels(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	svc := newGatewayRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})

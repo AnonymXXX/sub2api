@@ -32,6 +32,26 @@ func (s *GatewayService) SelectAccountForModel(ctx context.Context, groupID *int
 
 // SelectAccountForModelWithExclusions selects an account supporting the requested model while excluding specified accounts.
 func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*Account, error) {
+	account, err := s.selectAccountForModelWithExclusionsInGroup(ctx, groupID, sessionHash, requestedModel, excludedIDs)
+	if err == nil {
+		return account, nil
+	}
+	apiKey, fallbackGroupID, ok := balanceFallbackRoute(ctx, groupID)
+	if !ok {
+		return nil, err
+	}
+	fallbackAccount, fallbackErr := s.selectAccountForModelWithExclusionsInGroup(ctx, fallbackGroupID, sessionHash, requestedModel, excludedIDs)
+	if fallbackErr != nil {
+		return nil, err
+	}
+	if fallbackErr := validateBalanceFallbackRoute(ctx, apiKey); fallbackErr != nil {
+		return nil, fallbackErr
+	}
+	activateBalanceFallbackRoute(apiKey)
+	return fallbackAccount, nil
+}
+
+func (s *GatewayService) selectAccountForModelWithExclusionsInGroup(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*Account, error) {
 	// 优先检查 context 中的强制平台（/antigravity 路由）
 	var platform string
 	forcePlatform, hasForcePlatform := ctx.Value(ctxkey.ForcePlatform).(string)

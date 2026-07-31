@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
@@ -17,6 +18,9 @@ type revokeCacheUserSubRepoStub struct {
 	sub            *UserSubscription
 	deleted        bool
 	getActiveCalls int
+	bonus          float64
+	bonusInTx      bool
+	deleteInTx     bool
 }
 
 func (r *revokeCacheUserSubRepoStub) GetByID(_ context.Context, id int64) (*UserSubscription, error) {
@@ -27,11 +31,21 @@ func (r *revokeCacheUserSubRepoStub) GetByID(_ context.Context, id int64) (*User
 	return &cp, nil
 }
 
-func (r *revokeCacheUserSubRepoStub) Delete(_ context.Context, id int64) error {
+func (r *revokeCacheUserSubRepoStub) Delete(ctx context.Context, id int64) error {
 	if r.sub == nil || r.sub.ID != id || r.deleted {
 		return ErrSubscriptionNotFound
 	}
+	r.deleteInTx = dbent.TxFromContext(ctx) != nil
 	r.deleted = true
+	return nil
+}
+
+func (r *revokeCacheUserSubRepoStub) SetMonthlyBonus(ctx context.Context, id int64, amountUSD float64) error {
+	if r.sub == nil || r.sub.ID != id || r.deleted {
+		return ErrSubscriptionNotFound
+	}
+	r.bonus = amountUSD
+	r.bonusInTx = dbent.TxFromContext(ctx) != nil
 	return nil
 }
 
@@ -73,6 +87,26 @@ func TestRevokeSubscription_InvalidatesL1CacheSynchronously(t *testing.T) {
 	_, err = svc.GetActiveSubscription(context.Background(), 10, 20)
 	require.ErrorIs(t, err, ErrSubscriptionNotFound)
 	require.Equal(t, 2, repo.getActiveCalls, "撤销后应回源确认订阅已不存在，不能命中旧 L1")
+}
+
+func TestRevokeSubscription_ClearsBonusAndDeletesInOneTransaction(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	repo := &revokeCacheUserSubRepoStub{
+		bonus: 25,
+		sub: &UserSubscription{
+			ID: 1, UserID: 10, GroupID: 20,
+			Status: SubscriptionStatusActive, ExpiresAt: time.Now().Add(time.Hour),
+		},
+	}
+	svc := NewSubscriptionService(groupRepoNoop{}, repo, nil, client, nil)
+	t.Cleanup(svc.Stop)
+
+	require.NoError(t, svc.RevokeSubscription(ctx, 1))
+	require.Zero(t, repo.bonus)
+	require.True(t, repo.bonusInTx)
+	require.True(t, repo.deleteInTx)
+	require.True(t, repo.deleted)
 }
 
 type restoreUserSubRepoStub struct {

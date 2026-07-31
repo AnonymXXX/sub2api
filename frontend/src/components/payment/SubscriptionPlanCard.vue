@@ -89,10 +89,14 @@
       <!-- Subscribe Button -->
       <button
         type="button"
-        :class="['w-full rounded-xl py-2.5 text-sm font-semibold transition-all active:scale-[0.98]', btnClass]"
-        @click="emit('select', plan)"
+        :class="[
+          'w-full rounded-xl py-2.5 text-sm font-semibold transition-all',
+          canSelect ? `${btnClass} active:scale-[0.98]` : 'cursor-not-allowed bg-gray-100 text-gray-400 dark:bg-dark-700 dark:text-dark-500',
+        ]"
+        :disabled="!canSelect"
+        @click="selectPlan"
       >
-        {{ isRenewal ? t('payment.renewNow') : t('payment.subscribeNow') }}
+        {{ buttonLabel }}
       </button>
     </div>
   </div>
@@ -121,9 +125,21 @@ const emit = defineEmits<{ select: [plan: SubscriptionPlan] }>()
 const { t } = useI18n()
 
 const platform = computed(() => props.plan.group_platform || '')
-const isRenewal = computed(() =>
-  props.activeSubscriptions?.some(s => s.group_id === props.plan.group_id && s.status === 'active') ?? false
-)
+const activeSubscription = computed(() => props.activeSubscriptions?.find(s => s.status === 'active') ?? null)
+const isRenewal = computed(() => activeSubscription.value?.group_id === props.plan.group_id)
+const canSelect = computed(() => {
+  if (!activeSubscription.value) return true
+  return isRenewal.value && activeSubscription.value.renewal_eligible
+})
+const buttonLabel = computed(() => {
+  if (!activeSubscription.value) return t('payment.subscribeNow')
+  if (!isRenewal.value) return t('payment.activePlanLocked')
+  return canSelect.value ? t('payment.renewNow') : t('payment.renewalUnavailable')
+})
+
+function selectPlan() {
+  if (canSelect.value) emit('select', props.plan)
+}
 
 // Derived color classes from central config
 const accentClass = computed(() => platformAccentBarClass(platform.value))

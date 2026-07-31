@@ -72,6 +72,7 @@ type postUsageBillingParams struct {
 	Subscription          *UserSubscription
 	RequestPayloadHash    string
 	IsSubscriptionBill    bool
+	FallbackBalanceCost   float64
 	AccountRateMultiplier float64
 	APIKeyService         APIKeyQuotaUpdater
 	Platform              string // 来自 APIKey 关联 Group 的平台标识
@@ -248,6 +249,11 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 			cmd.SubscriptionID = usageLog.SubscriptionID
 		}
 	}
+	if p.APIKey.BalanceGroupID != nil {
+		cmd.BalanceGroupID = p.APIKey.BalanceGroupID
+	} else {
+		cmd.BalanceGroupID = p.APIKey.GroupID
+	}
 
 	// Record subscription / balance cost using ActualCost so the group (and any
 	// user-specific) rate multiplier consumes subscription quota at the expected
@@ -255,7 +261,12 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 	// on "> 0" still correctly skip free subscriptions (RateMultiplier == 0).
 	if p.IsSubscriptionBill && p.Subscription != nil && p.Cost.TotalCost > 0 {
 		cmd.SubscriptionID = &p.Subscription.ID
+		cmd.SubscriptionGroupID = p.APIKey.GroupID
 		cmd.SubscriptionCost = p.Cost.ActualCost
+		cmd.FallbackBalanceCost = p.FallbackBalanceCost
+		if cmd.FallbackBalanceCost <= 0 {
+			cmd.FallbackBalanceCost = p.Cost.ActualCost
+		}
 	} else if p.Cost.ActualCost > 0 {
 		cmd.BalanceCost = p.Cost.ActualCost
 	}
@@ -303,9 +314,41 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 			invalidator.InvalidateAuthCacheByKey(billingCtx, p.APIKey.Key)
 		}
 	}
+	applyFinalUsageBillingResult(usageLog, p, result)
 
 	finalizePostUsageBilling(billingCtx, p, deps, result)
 	return true, nil
+}
+
+func applyFinalUsageBillingResult(usageLog *UsageLog, p *postUsageBillingParams, result *UsageBillingApplyResult) {
+	if p == nil || result == nil {
+		return
+	}
+	p.IsSubscriptionBill = result.FinalBillingType == BillingTypeSubscription
+	if !p.IsSubscriptionBill {
+		p.Subscription = nil
+	}
+	if p.Cost != nil {
+		p.Cost.ActualCost = result.FinalCost
+	}
+	if usageLog == nil {
+		return
+	}
+	usageLog.BillingType = result.FinalBillingType
+	usageLog.GroupID = cloneUsageBillingInt64Ptr(result.FinalGroupID)
+	usageLog.SubscriptionID = cloneUsageBillingInt64Ptr(result.FinalSubscriptionID)
+	usageLog.ActualCost = result.FinalCost
+	if usageLog.TotalCost > 0 {
+		usageLog.RateMultiplier = result.FinalCost / usageLog.TotalCost
+	}
+}
+
+func cloneUsageBillingInt64Ptr(value *int64) *int64 {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *billingDeps, result *UsageBillingApplyResult) {
@@ -688,6 +731,21 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 
 	// 判断计费方式：订阅模式 vs 余额模式
 	isSubscriptionBilling := subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
+	fallbackBalanceCost := cost.ActualCost
+	if isSubscriptionBilling && apiKey.BalanceGroup != nil {
+		balanceKey := apiKey.ForBalanceBilling()
+		balanceMultiplier := 1.0
+		if s.cfg != nil {
+			balanceMultiplier = s.cfg.Default.RateMultiplier
+		}
+		if balanceKey.GroupID != nil && balanceKey.Group != nil {
+			balanceMultiplier = s.getUserGroupRateMultiplier(ctx, user.ID, *balanceKey.GroupID, balanceKey.Group.RateMultiplier)
+		}
+		balanceMultiplier, balanceImageMultiplier := computePeakAwareMultipliers(balanceKey, balanceMultiplier, timezone.Now())
+		if balanceCost := s.calculateRecordUsageCost(ctx, result, balanceKey, billingModel, balanceMultiplier, balanceImageMultiplier, opts); balanceCost != nil {
+			fallbackBalanceCost = balanceCost.ActualCost
+		}
+	}
 	billingType := BillingTypeBalance
 	if isSubscriptionBilling {
 		billingType = BillingTypeSubscription
@@ -698,24 +756,19 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	usageLog := s.buildRecordUsageLog(ctx, input, result, apiKey, user, account, subscription,
 		requestedModel, multiplier, imageMultiplier, accountRateMultiplier, billingType, cacheTTLOverridden, cost, opts)
 
-	// 计算账号统计定价费用（使用最终上游模型匹配自定义规则）
-	if apiKey.GroupID != nil {
-		applyAccountStatsCost(ctx, usageLog, s.channelService, s.billingService,
-			account.ID, *apiKey.GroupID, result.UpstreamModel, result.Model,
-			// Anthropic's input_tokens excludes cache_read and cache_creation (billed separately);
-			// OpenAI gateway uses actualInputTokens which also excludes cache_read for the same reason.
-			UsageTokens{
-				InputTokens:         result.Usage.InputTokens,
-				OutputTokens:        result.Usage.OutputTokens,
-				CacheCreationTokens: result.Usage.CacheCreationInputTokens,
-				CacheReadTokens:     result.Usage.CacheReadInputTokens,
-				ImageOutputTokens:   result.Usage.ImageOutputTokens,
-			},
-			cost.TotalCost,
-		)
+	accountStatsTokens := UsageTokens{
+		// Anthropic's input_tokens excludes cache_read and cache_creation
+		// (billed separately).
+		InputTokens:         result.Usage.InputTokens,
+		OutputTokens:        result.Usage.OutputTokens,
+		CacheCreationTokens: result.Usage.CacheCreationInputTokens,
+		CacheReadTokens:     result.Usage.CacheReadInputTokens,
+		ImageOutputTokens:   result.Usage.ImageOutputTokens,
 	}
 
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+		applyFinalAccountStatsCost(ctx, usageLog, s.channelService, s.billingService,
+			account.ID, result.UpstreamModel, result.Model, accountStatsTokens, cost.TotalCost)
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.gateway")
 		logger.LegacyPrintf("service.gateway", "[SIMPLE MODE] Usage recorded (not billed): user=%d, tokens=%d", usageLog.UserID, usageLog.TotalTokens())
 		s.deferredService.ScheduleLastUsedUpdate(account.ID)
@@ -738,6 +791,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		Subscription:          subscription,
 		RequestPayloadHash:    resolveUsageBillingPayloadFingerprint(ctx, input.RequestPayloadHash),
 		IsSubscriptionBill:    isSubscriptionBilling,
+		FallbackBalanceCost:   fallbackBalanceCost,
 		AccountRateMultiplier: accountRateMultiplier,
 		APIKeyService:         input.APIKeyService,
 		Platform:              quotaPlatform,
@@ -746,6 +800,8 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	if billingErr != nil {
 		return billingErr
 	}
+	applyFinalAccountStatsCost(ctx, usageLog, s.channelService, s.billingService,
+		account.ID, result.UpstreamModel, result.Model, accountStatsTokens, cost.TotalCost)
 	writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.gateway")
 
 	return nil

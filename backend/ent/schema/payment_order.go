@@ -87,6 +87,13 @@ func (PaymentOrder) Fields() []ent.Field {
 		field.Int("subscription_days").
 			Optional().
 			Nillable(),
+		field.String("subscription_action").
+			Optional().
+			Nillable().
+			MaxLen(20),
+		field.Int64("subscription_id").
+			Optional().
+			Nillable(),
 		field.String("provider_instance_id").
 			Optional().
 			Nillable().
@@ -195,5 +202,10 @@ func (PaymentOrder) Indexes() []ent.Index {
 		index.Fields("paid_at"),
 		index.Fields("payment_type", "paid_at"),
 		index.Fields("order_type"),
+		index.Fields("subscription_id"),
+		index.Fields("user_id").
+			Unique().
+			StorageKey("payment_orders_user_unfinished_subscription_unique").
+			Annotations(entsql.IndexWhere("order_type = 'subscription' AND status IN ('PENDING', 'PAID', 'RECHARGING')")),
 	}
 }

@@ -101,6 +101,8 @@ export interface PaymentOrder {
   refund_requested_by?: number
   refund_request_reason?: string
   plan_id?: number
+  subscription_action?: 'purchase' | 'renewal'
+  subscription_id?: number
   provider_instance_id?: string
 }
 

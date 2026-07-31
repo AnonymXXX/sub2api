@@ -636,6 +636,134 @@ func TestAlreadyProcessedRecoversStaleRechargingLease(t *testing.T) {
 	require.Equal(t, OrderStatusCompleted, reloaded.Status)
 }
 
+func TestToPaidRecoversFailedRenewalWithoutPaidAt(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	ensurePaymentAuditOrderActionUniqueIndex(t, ctx, client)
+	order := createPaymentFulfillmentSubscriptionOrder(t, ctx, client, OrderStatusFailed, time.Now().Add(-time.Minute))
+	order, err := client.PaymentOrder.UpdateOneID(order.ID).
+		SetSubscriptionAction(payment.SubscriptionActionRenewal).
+		SetSubscriptionID(99).
+		ClearPaidAt().
+		SetFailedReason("payment creation failed").
+		Save(ctx)
+	require.NoError(t, err)
+
+	originalStart := time.Now().Add(-10 * 24 * time.Hour).Truncate(time.Second)
+	subRepo := newSingleSubscriptionRepoStub()
+	subRepo.seed(&UserSubscription{
+		ID: 99, UserID: order.UserID, GroupID: *order.SubscriptionGroupID,
+		Status: SubscriptionStatusActive, StartsAt: originalStart,
+		ExpiresAt: originalStart.Add(30 * 24 * time.Hour),
+	})
+	subRepo.active = &UserSubscription{
+		ID: 99, UserID: order.UserID, GroupID: *order.SubscriptionGroupID,
+		Status: SubscriptionStatusActive, StartsAt: originalStart,
+		ExpiresAt: originalStart.Add(30 * 24 * time.Hour),
+	}
+	groupRepo := &subscriptionGroupRepoStub{
+		group: &Group{ID: *order.SubscriptionGroupID, Status: payment.EntityStatusActive, SubscriptionType: SubscriptionTypeSubscription},
+	}
+	svc := &PaymentService{
+		entClient:       client,
+		groupRepo:       groupRepo,
+		subscriptionSvc: NewSubscriptionService(groupRepo, subRepo, nil, nil, nil),
+	}
+
+	beforePaid := time.Now()
+	require.NoError(t, svc.toPaid(ctx, order, "trade-recovered", order.PayAmount, payment.TypeAlipay))
+	afterPaid := time.Now()
+
+	reloaded, err := client.PaymentOrder.Get(ctx, order.ID)
+	require.NoError(t, err)
+	require.Equal(t, OrderStatusCompleted, reloaded.Status)
+	require.NotNil(t, reloaded.PaidAt)
+	require.False(t, reloaded.PaidAt.Before(beforePaid))
+	require.False(t, reloaded.PaidAt.After(afterPaid))
+	require.Equal(t, "trade-recovered", reloaded.PaymentTradeNo)
+	require.Nil(t, reloaded.FailedAt)
+	require.Nil(t, reloaded.FailedReason)
+
+	renewed, err := subRepo.GetByID(ctx, 99)
+	require.NoError(t, err)
+	require.True(t, renewed.StartsAt.Equal(*reloaded.PaidAt))
+	require.True(t, renewed.ExpiresAt.Equal(reloaded.PaidAt.AddDate(0, 0, 30)))
+}
+
+func TestToPaidRetriesFailedFulfillmentWithoutReplacingPaidAt(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	ensurePaymentAuditOrderActionUniqueIndex(t, ctx, client)
+	order := createPaymentFulfillmentSubscriptionOrder(t, ctx, client, OrderStatusFailed, time.Now().Add(-time.Minute))
+	require.NotNil(t, order.PaidAt)
+	originalPaidAt := *order.PaidAt
+	_, err := client.PaymentAuditLog.Create().
+		SetOrderID(strconv.FormatInt(order.ID, 10)).
+		SetAction("SUBSCRIPTION_ASSIGNED").
+		SetDetail(`{"groupID":7,"validityDays":30}`).
+		SetOperator("system").
+		Save(ctx)
+	require.NoError(t, err)
+
+	groupRepo := &subscriptionGroupRepoStub{
+		group: &Group{ID: 7, Status: payment.EntityStatusActive, SubscriptionType: SubscriptionTypeSubscription},
+	}
+	svc := &PaymentService{
+		entClient:       client,
+		groupRepo:       groupRepo,
+		subscriptionSvc: NewSubscriptionService(groupRepo, userSubRepoNoop{}, nil, nil, nil),
+	}
+
+	require.NoError(t, svc.toPaid(ctx, order, "trade-late-retry", order.PayAmount, payment.TypeAlipay))
+
+	reloaded, err := client.PaymentOrder.Get(ctx, order.ID)
+	require.NoError(t, err)
+	require.Equal(t, OrderStatusCompleted, reloaded.Status)
+	require.NotNil(t, reloaded.PaidAt)
+	require.True(t, reloaded.PaidAt.Equal(originalPaidAt))
+	require.Equal(t, "trade-fulfillment", reloaded.PaymentTradeNo)
+}
+
+func TestToPaidDoesNotRecoverFailedSubscriptionOverAnotherPendingOrder(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	failed := createPaymentFulfillmentSubscriptionOrder(t, ctx, client, OrderStatusFailed, time.Now().Add(-time.Minute))
+	failed, err := client.PaymentOrder.UpdateOneID(failed.ID).ClearPaidAt().Save(ctx)
+	require.NoError(t, err)
+
+	_, err = client.PaymentOrder.Create().
+		SetUserID(failed.UserID).
+		SetUserEmail(failed.UserEmail).
+		SetUserName(failed.UserName).
+		SetAmount(failed.Amount).
+		SetPayAmount(failed.PayAmount).
+		SetFeeRate(failed.FeeRate).
+		SetRechargeCode("PAY-SUB-PENDING-" + strconv.FormatInt(time.Now().UnixNano(), 10)).
+		SetOutTradeNo("sub2_pending_" + strconv.FormatInt(time.Now().UnixNano(), 10)).
+		SetPaymentType(payment.TypeAlipay).
+		SetPaymentTradeNo("").
+		SetOrderType(payment.OrderTypeSubscription).
+		SetPlanID(101).
+		SetSubscriptionGroupID(7).
+		SetSubscriptionDays(30).
+		SetStatus(OrderStatusPending).
+		SetExpiresAt(time.Now().Add(time.Hour)).
+		SetClientIP("127.0.0.1").
+		SetSrcHost("api.example.com").
+		Save(ctx)
+	require.NoError(t, err)
+
+	svc := &PaymentService{entClient: client}
+	err = svc.toPaid(ctx, failed, "trade-conflict", failed.PayAmount, payment.TypeAlipay)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "update to PAID")
+
+	reloaded, getErr := client.PaymentOrder.Get(ctx, failed.ID)
+	require.NoError(t, getErr)
+	require.Equal(t, OrderStatusFailed, reloaded.Status)
+	require.Nil(t, reloaded.PaidAt)
+}
+
 func TestFulfillmentLeaseVersionRejectsStaleWorker(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)
@@ -762,6 +890,40 @@ func TestExecuteSubscriptionFulfillmentRecoversCommittedAssignmentWithoutExtendi
 		Count(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 1, assignmentAuditCount)
+}
+
+func TestExecuteSubscriptionFulfillmentRejectsPurchaseWhenAnotherEntitlementIsActive(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	ensurePaymentAuditOrderActionUniqueIndex(t, ctx, client)
+	order := createPaymentFulfillmentSubscriptionOrder(t, ctx, client, OrderStatusFailed, time.Now().Add(-time.Minute))
+
+	subRepo := newSubscriptionUserSubRepoStub()
+	subRepo.seed(&UserSubscription{
+		ID: 99, UserID: order.UserID, GroupID: *order.SubscriptionGroupID,
+		StartsAt: time.Now().Add(-time.Hour), ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
+		Status: SubscriptionStatusActive, Notes: "payment order from a newer purchase",
+	})
+	groupRepo := &subscriptionGroupRepoStub{
+		group: &Group{ID: 7, Status: payment.EntityStatusActive, SubscriptionType: SubscriptionTypeSubscription},
+	}
+	svc := &PaymentService{
+		entClient:       client,
+		groupRepo:       groupRepo,
+		subscriptionSvc: NewSubscriptionService(groupRepo, subRepo, nil, nil, nil),
+	}
+
+	err := svc.ExecuteSubscriptionFulfillment(ctx, order.ID)
+
+	require.Error(t, err)
+	require.Equal(t, "SUBSCRIPTION_PURCHASE_CONFLICT", infraerrors.Reason(err))
+	reloaded, getErr := client.PaymentOrder.Get(ctx, order.ID)
+	require.NoError(t, getErr)
+	require.Equal(t, OrderStatusFailed, reloaded.Status)
+	require.Zero(t, subRepo.createCalls)
+	existing, getErr := subRepo.GetByID(ctx, 99)
+	require.NoError(t, getErr)
+	require.Equal(t, "payment order from a newer purchase", existing.Notes)
 }
 
 func TestHasPaymentSubscriptionOrderNoteRequiresIndependentExactLine(t *testing.T) {

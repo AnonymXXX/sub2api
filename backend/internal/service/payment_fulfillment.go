@@ -157,6 +157,10 @@ func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, trad
 			paymentorder.StatusEQ(OrderStatusPending),
 			paymentorder.StatusEQ(OrderStatusCancelled),
 			paymentorder.And(
+				paymentorder.StatusEQ(OrderStatusFailed),
+				paymentorder.PaidAtIsNil(),
+			),
+			paymentorder.And(
 				paymentorder.StatusEQ(OrderStatusExpired),
 				paymentorder.UpdatedAtGTE(grace),
 			),
@@ -168,7 +172,7 @@ func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, trad
 	if c == 0 {
 		return s.alreadyProcessed(ctx, o)
 	}
-	if previousStatus == OrderStatusCancelled || previousStatus == OrderStatusExpired {
+	if previousStatus == OrderStatusCancelled || previousStatus == OrderStatusExpired || previousStatus == OrderStatusFailed {
 		slog.Info("order recovered from webhook payment success",
 			"orderID", o.ID,
 			"previousStatus", previousStatus,
@@ -539,21 +543,46 @@ func (s *PaymentService) ensurePaymentSubscriptionAssigned(ctx context.Context, 
 		case lookupErr != nil && !errors.Is(lookupErr, ErrSubscriptionNotFound):
 			return fmt.Errorf("check existing subscription assignment: %w", lookupErr)
 		default:
-			if _, _, err := s.subscriptionSvc.assignOrExtendSubscription(txCtx, &AssignSubscriptionInput{
-				UserID:       o.UserID,
-				GroupID:      groupID,
-				ValidityDays: days,
-				AssignedBy:   0,
-				Notes:        orderNote,
-			}, true); err != nil {
-				return fmt.Errorf("assign subscription: %w", err)
+			action := payment.SubscriptionActionPurchase
+			if o.SubscriptionAction != nil && strings.TrimSpace(*o.SubscriptionAction) != "" {
+				action = strings.TrimSpace(*o.SubscriptionAction)
+			}
+			switch action {
+			case payment.SubscriptionActionPurchase:
+				assigned, _, err := s.subscriptionSvc.assignOrExtendSubscription(txCtx, &AssignSubscriptionInput{
+					UserID:       o.UserID,
+					GroupID:      groupID,
+					ValidityDays: days,
+					AssignedBy:   0,
+					Notes:        orderNote,
+				}, true)
+				if err != nil {
+					return fmt.Errorf("assign subscription: %w", err)
+				}
+				if assigned == nil || !hasPaymentSubscriptionOrderNote(assigned.Notes, orderNote) {
+					return infraerrors.Conflict(
+						"SUBSCRIPTION_PURCHASE_CONFLICT",
+						"another subscription entitlement became active before this order was fulfilled",
+					)
+				}
+			case payment.SubscriptionActionRenewal:
+				if o.SubscriptionID == nil || o.PaidAt == nil {
+					return errors.New("renewal order is missing subscription snapshot or paid time")
+				}
+				if _, err := s.subscriptionSvc.RenewSubscription(txCtx, *o.SubscriptionID, o.UserID, groupID, *o.PaidAt, days, orderNote); err != nil {
+					return fmt.Errorf("renew subscription: %w", err)
+				}
+			default:
+				return fmt.Errorf("unsupported subscription action %q", action)
 			}
 		}
 
 		detail, _ := json.Marshal(map[string]any{
-			"groupID":           groupID,
-			"validityDays":      days,
-			"recoveredFromNote": recoveredFromNote,
+			"groupID":            groupID,
+			"validityDays":       days,
+			"subscriptionAction": o.SubscriptionAction,
+			"subscriptionID":     o.SubscriptionID,
+			"recoveredFromNote":  recoveredFromNote,
 		})
 		if _, err := txClient.PaymentAuditLog.Create().
 			SetOrderID(strconv.FormatInt(o.ID, 10)).

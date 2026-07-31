@@ -365,6 +365,53 @@ func (_u *PaymentOrderUpdate) ClearSubscriptionDays() *PaymentOrderUpdate {
 	return _u
 }
 
+// SetSubscriptionAction sets the "subscription_action" field.
+func (_u *PaymentOrderUpdate) SetSubscriptionAction(v string) *PaymentOrderUpdate {
+	_u.mutation.SetSubscriptionAction(v)
+	return _u
+}
+
+// SetNillableSubscriptionAction sets the "subscription_action" field if the given value is not nil.
+func (_u *PaymentOrderUpdate) SetNillableSubscriptionAction(v *string) *PaymentOrderUpdate {
+	if v != nil {
+		_u.SetSubscriptionAction(*v)
+	}
+	return _u
+}
+
+// ClearSubscriptionAction clears the value of the "subscription_action" field.
+func (_u *PaymentOrderUpdate) ClearSubscriptionAction() *PaymentOrderUpdate {
+	_u.mutation.ClearSubscriptionAction()
+	return _u
+}
+
+// SetSubscriptionID sets the "subscription_id" field.
+func (_u *PaymentOrderUpdate) SetSubscriptionID(v int64) *PaymentOrderUpdate {
+	_u.mutation.ResetSubscriptionID()
+	_u.mutation.SetSubscriptionID(v)
+	return _u
+}
+
+// SetNillableSubscriptionID sets the "subscription_id" field if the given value is not nil.
+func (_u *PaymentOrderUpdate) SetNillableSubscriptionID(v *int64) *PaymentOrderUpdate {
+	if v != nil {
+		_u.SetSubscriptionID(*v)
+	}
+	return _u
+}
+
+// AddSubscriptionID adds value to the "subscription_id" field.
+func (_u *PaymentOrderUpdate) AddSubscriptionID(v int64) *PaymentOrderUpdate {
+	_u.mutation.AddSubscriptionID(v)
+	return _u
+}
+
+// ClearSubscriptionID clears the value of the "subscription_id" field.
+func (_u *PaymentOrderUpdate) ClearSubscriptionID() *PaymentOrderUpdate {
+	_u.mutation.ClearSubscriptionID()
+	return _u
+}
+
 // SetProviderInstanceID sets the "provider_instance_id" field.
 func (_u *PaymentOrderUpdate) SetProviderInstanceID(v string) *PaymentOrderUpdate {
 	_u.mutation.SetProviderInstanceID(v)
@@ -803,6 +850,11 @@ func (_u *PaymentOrderUpdate) check() error {
 			return &ValidationError{Name: "order_type", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.order_type": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.SubscriptionAction(); ok {
+		if err := paymentorder.SubscriptionActionValidator(v); err != nil {
+			return &ValidationError{Name: "subscription_action", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.subscription_action": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.ProviderInstanceID(); ok {
 		if err := paymentorder.ProviderInstanceIDValidator(v); err != nil {
 			return &ValidationError{Name: "provider_instance_id", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.provider_instance_id": %w`, err)}
@@ -940,6 +992,21 @@ func (_u *PaymentOrderUpdate) sqlSave(ctx context.Context) (_node int, err error
 	}
 	if _u.mutation.SubscriptionDaysCleared() {
 		_spec.ClearField(paymentorder.FieldSubscriptionDays, field.TypeInt)
+	}
+	if value, ok := _u.mutation.SubscriptionAction(); ok {
+		_spec.SetField(paymentorder.FieldSubscriptionAction, field.TypeString, value)
+	}
+	if _u.mutation.SubscriptionActionCleared() {
+		_spec.ClearField(paymentorder.FieldSubscriptionAction, field.TypeString)
+	}
+	if value, ok := _u.mutation.SubscriptionID(); ok {
+		_spec.SetField(paymentorder.FieldSubscriptionID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedSubscriptionID(); ok {
+		_spec.AddField(paymentorder.FieldSubscriptionID, field.TypeInt64, value)
+	}
+	if _u.mutation.SubscriptionIDCleared() {
+		_spec.ClearField(paymentorder.FieldSubscriptionID, field.TypeInt64)
 	}
 	if value, ok := _u.mutation.ProviderInstanceID(); ok {
 		_spec.SetField(paymentorder.FieldProviderInstanceID, field.TypeString, value)
@@ -1428,6 +1495,53 @@ func (_u *PaymentOrderUpdateOne) ClearSubscriptionDays() *PaymentOrderUpdateOne 
 	return _u
 }
 
+// SetSubscriptionAction sets the "subscription_action" field.
+func (_u *PaymentOrderUpdateOne) SetSubscriptionAction(v string) *PaymentOrderUpdateOne {
+	_u.mutation.SetSubscriptionAction(v)
+	return _u
+}
+
+// SetNillableSubscriptionAction sets the "subscription_action" field if the given value is not nil.
+func (_u *PaymentOrderUpdateOne) SetNillableSubscriptionAction(v *string) *PaymentOrderUpdateOne {
+	if v != nil {
+		_u.SetSubscriptionAction(*v)
+	}
+	return _u
+}
+
+// ClearSubscriptionAction clears the value of the "subscription_action" field.
+func (_u *PaymentOrderUpdateOne) ClearSubscriptionAction() *PaymentOrderUpdateOne {
+	_u.mutation.ClearSubscriptionAction()
+	return _u
+}
+
+// SetSubscriptionID sets the "subscription_id" field.
+func (_u *PaymentOrderUpdateOne) SetSubscriptionID(v int64) *PaymentOrderUpdateOne {
+	_u.mutation.ResetSubscriptionID()
+	_u.mutation.SetSubscriptionID(v)
+	return _u
+}
+
+// SetNillableSubscriptionID sets the "subscription_id" field if the given value is not nil.
+func (_u *PaymentOrderUpdateOne) SetNillableSubscriptionID(v *int64) *PaymentOrderUpdateOne {
+	if v != nil {
+		_u.SetSubscriptionID(*v)
+	}
+	return _u
+}
+
+// AddSubscriptionID adds value to the "subscription_id" field.
+func (_u *PaymentOrderUpdateOne) AddSubscriptionID(v int64) *PaymentOrderUpdateOne {
+	_u.mutation.AddSubscriptionID(v)
+	return _u
+}
+
+// ClearSubscriptionID clears the value of the "subscription_id" field.
+func (_u *PaymentOrderUpdateOne) ClearSubscriptionID() *PaymentOrderUpdateOne {
+	_u.mutation.ClearSubscriptionID()
+	return _u
+}
+
 // SetProviderInstanceID sets the "provider_instance_id" field.
 func (_u *PaymentOrderUpdateOne) SetProviderInstanceID(v string) *PaymentOrderUpdateOne {
 	_u.mutation.SetProviderInstanceID(v)
@@ -1879,6 +1993,11 @@ func (_u *PaymentOrderUpdateOne) check() error {
 			return &ValidationError{Name: "order_type", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.order_type": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.SubscriptionAction(); ok {
+		if err := paymentorder.SubscriptionActionValidator(v); err != nil {
+			return &ValidationError{Name: "subscription_action", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.subscription_action": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.ProviderInstanceID(); ok {
 		if err := paymentorder.ProviderInstanceIDValidator(v); err != nil {
 			return &ValidationError{Name: "provider_instance_id", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.provider_instance_id": %w`, err)}
@@ -2033,6 +2152,21 @@ func (_u *PaymentOrderUpdateOne) sqlSave(ctx context.Context) (_node *PaymentOrd
 	}
 	if _u.mutation.SubscriptionDaysCleared() {
 		_spec.ClearField(paymentorder.FieldSubscriptionDays, field.TypeInt)
+	}
+	if value, ok := _u.mutation.SubscriptionAction(); ok {
+		_spec.SetField(paymentorder.FieldSubscriptionAction, field.TypeString, value)
+	}
+	if _u.mutation.SubscriptionActionCleared() {
+		_spec.ClearField(paymentorder.FieldSubscriptionAction, field.TypeString)
+	}
+	if value, ok := _u.mutation.SubscriptionID(); ok {
+		_spec.SetField(paymentorder.FieldSubscriptionID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedSubscriptionID(); ok {
+		_spec.AddField(paymentorder.FieldSubscriptionID, field.TypeInt64, value)
+	}
+	if _u.mutation.SubscriptionIDCleared() {
+		_spec.ClearField(paymentorder.FieldSubscriptionID, field.TypeInt64)
 	}
 	if value, ok := _u.mutation.ProviderInstanceID(); ok {
 		_spec.SetField(paymentorder.FieldProviderInstanceID, field.TypeString, value)

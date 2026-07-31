@@ -288,22 +288,22 @@
               </div>
 
               <!-- Monthly Usage -->
-              <div v-if="row.group?.monthly_limit_usd" class="usage-row">
+              <div v-if="effectiveMonthlyLimit(row) > 0" class="usage-row">
                 <div class="flex items-center gap-2">
                   <span class="usage-label">{{ t('admin.subscriptions.monthly') }}</span>
                   <div class="h-1.5 flex-1 rounded-full bg-gray-200 dark:bg-dark-600">
                     <div
                       class="h-1.5 rounded-full transition-all"
-                      :class="getProgressClass(row.monthly_usage_usd, row.group?.monthly_limit_usd)"
+                      :class="getProgressClass(row.monthly_usage_usd, effectiveMonthlyLimit(row))"
                       :style="{
-                        width: getProgressWidth(row.monthly_usage_usd, row.group?.monthly_limit_usd)
+                        width: getProgressWidth(row.monthly_usage_usd, effectiveMonthlyLimit(row))
                       }"
                     ></div>
                   </div>
                   <span class="usage-amount">
                     ${{ row.monthly_usage_usd?.toFixed(2) || '0.00' }}
                     <span class="text-gray-400">/</span>
-                    ${{ row.group?.monthly_limit_usd?.toFixed(2) }}
+                    ${{ effectiveMonthlyLimit(row).toFixed(2) }}
                   </span>
                 </div>
                 <div class="reset-info" v-if="row.monthly_window_start">
@@ -321,6 +321,10 @@
                     />
                   </svg>
                   <span>{{ formatResetTime(row.monthly_window_start, 'monthly') }}</span>
+                </div>
+                <div v-if="row.monthly_bonus_usd > 0" class="reset-info text-emerald-600 dark:text-emerald-400">
+                  <Icon name="plus" size="xs" />
+                  <span>{{ t('admin.subscriptions.monthlyBonusValue', { bonus: row.monthly_bonus_usd.toFixed(2), limit: effectiveMonthlyLimit(row).toFixed(2) }) }}</span>
                 </div>
               </div>
 
@@ -395,6 +399,15 @@
               >
                 <Icon name="refresh" size="sm" />
                 <span class="text-xs">{{ t('admin.subscriptions.resetQuota') }}</span>
+              </button>
+              <button
+                v-if="row.status === 'active'"
+                @click="handleMonthlyBonus(row)"
+                :disabled="settingMonthlyBonus && bonusSubscription?.id === row.id"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-900/20 dark:hover:text-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Icon name="plus" size="sm" />
+                <span class="text-xs">{{ t('admin.subscriptions.monthlyBonus') }}</span>
               </button>
               <button
                 v-if="row.status === 'active'"
@@ -664,16 +677,57 @@
       @cancel="showRestoreDialog = false"
     />
 
-    <!-- Reset Quota Confirmation Dialog -->
-    <ConfirmDialog
-      :show="showResetQuotaConfirm"
-      :title="t('admin.subscriptions.resetQuotaTitle')"
-      :message="t('admin.subscriptions.resetQuotaConfirm', { user: resettingSubscription?.user?.email })"
-      :confirm-text="t('admin.subscriptions.resetQuota')"
-      :cancel-text="t('common.cancel')"
-      @confirm="confirmResetQuota"
-      @cancel="showResetQuotaConfirm = false"
-    />
+    <!-- Reset Quota Dialog -->
+    <BaseDialog :show="showResetQuotaConfirm" :title="t('admin.subscriptions.resetQuotaTitle')" width="narrow" @close="closeResetQuotaModal">
+      <div class="space-y-4">
+        <p class="text-sm text-gray-600 dark:text-gray-400">
+          {{ t('admin.subscriptions.resetQuotaFor', { user: resettingSubscription?.user?.email }) }}
+        </p>
+        <div class="space-y-3">
+          <label v-for="period in quotaResetPeriods" :key="period.key" class="flex cursor-pointer items-start gap-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600">
+            <input v-model="quotaResetOptions[period.key]" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+            <span>
+              <span class="block text-sm font-medium text-gray-800 dark:text-gray-200">{{ period.label }}</span>
+              <span class="block text-xs text-gray-500 dark:text-gray-400">{{ period.description }}</span>
+            </span>
+          </label>
+        </div>
+        <p v-if="quotaResetOptions.monthly" class="rounded-lg bg-amber-50 p-3 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+          {{ t('admin.subscriptions.monthlyResetWarning') }}
+        </p>
+        <p v-if="!resetSelectionValid" class="text-xs text-red-600 dark:text-red-400">{{ t('admin.subscriptions.selectResetPeriod') }}</p>
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-3">
+          <button type="button" class="btn btn-secondary" @click="closeResetQuotaModal">{{ t('common.cancel') }}</button>
+          <button type="button" class="btn btn-primary" :disabled="!resetSelectionValid || resettingQuota" @click="confirmResetQuota">
+            {{ resettingQuota ? t('common.processing') : t('admin.subscriptions.resetQuota') }}
+          </button>
+        </div>
+      </template>
+    </BaseDialog>
+
+    <!-- Monthly Bonus Dialog -->
+    <BaseDialog :show="showMonthlyBonusModal" :title="t('admin.subscriptions.monthlyBonusTitle')" width="narrow" @close="closeMonthlyBonusModal">
+      <form id="monthly-bonus-form" class="space-y-4" @submit.prevent="confirmMonthlyBonus">
+        <p class="text-sm text-gray-600 dark:text-gray-400">
+          {{ t('admin.subscriptions.monthlyBonusFor', { user: bonusSubscription?.user?.email }) }}
+        </p>
+        <div>
+          <label class="input-label">{{ t('admin.subscriptions.monthlyBonusAmount') }}</label>
+          <input v-model.number="monthlyBonusForm.amount_usd" type="number" min="0" step="0.01" required class="input" />
+          <p class="input-hint">{{ t('admin.subscriptions.monthlyBonusHint') }}</p>
+        </div>
+      </form>
+      <template #footer>
+        <div class="flex justify-end gap-3">
+          <button type="button" class="btn btn-secondary" @click="closeMonthlyBonusModal">{{ t('common.cancel') }}</button>
+          <button type="submit" form="monthly-bonus-form" class="btn btn-primary" :disabled="settingMonthlyBonus">
+            {{ settingMonthlyBonus ? t('common.processing') : t('common.save') }}
+          </button>
+        </div>
+      </template>
+    </BaseDialog>
     <!-- Subscription Guide Modal -->
     <teleport to="body">
       <transition name="modal">
@@ -961,9 +1015,12 @@ const showExtendModal = ref(false)
 const showRevokeDialog = ref(false)
 const showRestoreDialog = ref(false)
 const showResetQuotaConfirm = ref(false)
+const showMonthlyBonusModal = ref(false)
 const submitting = ref(false)
 const resettingSubscription = ref<UserSubscription | null>(null)
 const resettingQuota = ref(false)
+const bonusSubscription = ref<UserSubscription | null>(null)
+const settingMonthlyBonus = ref(false)
 const extendingSubscription = ref<UserSubscription | null>(null)
 const revokingSubscription = ref<UserSubscription | null>(null)
 const restoringSubscription = ref<UserSubscription | null>(null)
@@ -977,6 +1034,20 @@ const assignForm = reactive({
 const extendForm = reactive({
   days: 30
 })
+
+type QuotaResetPeriod = 'daily' | 'weekly' | 'monthly'
+const quotaResetOptions = reactive<Record<QuotaResetPeriod, boolean>>({
+  daily: true,
+  weekly: false,
+  monthly: false
+})
+const resetSelectionValid = computed(() => Object.values(quotaResetOptions).some(Boolean))
+const quotaResetPeriods = computed<Array<{ key: QuotaResetPeriod; label: string; description: string }>>(() => [
+  { key: 'daily', label: t('admin.subscriptions.daily'), description: t('admin.subscriptions.resetDailyDesc') },
+  { key: 'weekly', label: t('admin.subscriptions.weekly'), description: t('admin.subscriptions.resetWeeklyDesc') },
+  { key: 'monthly', label: t('admin.subscriptions.monthly'), description: t('admin.subscriptions.resetMonthlyDesc') }
+])
+const monthlyBonusForm = reactive({ amount_usd: 0 })
 
 // Group options for filter (all groups)
 const groupOptions = computed(() => [
@@ -1304,15 +1375,24 @@ const confirmRestore = async () => {
 
 const handleResetQuota = (subscription: UserSubscription) => {
   resettingSubscription.value = subscription
+  quotaResetOptions.daily = true
+  quotaResetOptions.weekly = false
+  quotaResetOptions.monthly = false
   showResetQuotaConfirm.value = true
 }
 
+const closeResetQuotaModal = () => {
+  if (resettingQuota.value) return
+  showResetQuotaConfirm.value = false
+  resettingSubscription.value = null
+}
+
 const confirmResetQuota = async () => {
-  if (!resettingSubscription.value) return
+  if (!resettingSubscription.value || !resetSelectionValid.value) return
   if (resettingQuota.value) return
   resettingQuota.value = true
   try {
-    await adminAPI.subscriptions.resetQuota(resettingSubscription.value.id, { daily: true, weekly: true, monthly: true })
+    await adminAPI.subscriptions.resetQuota(resettingSubscription.value.id, { ...quotaResetOptions })
     appStore.showSuccess(t('admin.subscriptions.quotaResetSuccess'))
     showResetQuotaConfirm.value = false
     resettingSubscription.value = null
@@ -1322,6 +1402,40 @@ const confirmResetQuota = async () => {
     console.error('Error resetting quota:', error)
   } finally {
     resettingQuota.value = false
+  }
+}
+
+const handleMonthlyBonus = (subscription: UserSubscription) => {
+  bonusSubscription.value = subscription
+  monthlyBonusForm.amount_usd = subscription.monthly_bonus_usd || 0
+  showMonthlyBonusModal.value = true
+}
+
+const closeMonthlyBonusModal = () => {
+  if (settingMonthlyBonus.value) return
+  showMonthlyBonusModal.value = false
+  bonusSubscription.value = null
+}
+
+const confirmMonthlyBonus = async () => {
+  if (!bonusSubscription.value || settingMonthlyBonus.value) return
+  const amount = Number(monthlyBonusForm.amount_usd)
+  if (!Number.isFinite(amount) || amount < 0) {
+    appStore.showError(t('admin.subscriptions.invalidMonthlyBonus'))
+    return
+  }
+  settingMonthlyBonus.value = true
+  try {
+    await adminAPI.subscriptions.setMonthlyBonus(bonusSubscription.value.id, { amount_usd: amount })
+    appStore.showSuccess(t('admin.subscriptions.monthlyBonusSaved'))
+    showMonthlyBonusModal.value = false
+    bonusSubscription.value = null
+    await loadSubscriptions()
+  } catch (error: any) {
+    appStore.showError(error.response?.data?.detail || t('admin.subscriptions.failedToSetMonthlyBonus'))
+    console.error('Error setting monthly bonus:', error)
+  } finally {
+    settingMonthlyBonus.value = false
   }
 }
 
@@ -1345,6 +1459,9 @@ const getProgressWidth = (used: number | null | undefined, limit: number | null)
   const percentage = Math.min((usedValue / limit) * 100, 100)
   return `${percentage}%`
 }
+
+const effectiveMonthlyLimit = (subscription: UserSubscription): number =>
+  subscription.effective_monthly_limit_usd || subscription.group?.monthly_limit_usd || 0
 
 const getProgressClass = (used: number | null | undefined, limit: number | null): string => {
   if (!limit || limit === 0) return 'bg-gray-400'

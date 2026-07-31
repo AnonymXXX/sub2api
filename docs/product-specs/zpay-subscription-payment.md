@@ -27,8 +27,8 @@ and account balance whenever the subscription is not applicable.
 
 - Provider: EasyPay-compatible ZPAY.
 - API base: `https://zpayz.cn`.
-- Notify URL: `https://api.lovebirds.xin/api/v1/payment/webhook/easypay`.
-- Return URL: `https://api.lovebirds.xin/payment/result`.
+- Notify URL: `https://api.y0lab.com/api/v1/payment/webhook/easypay`.
+- Return URL: `https://api.y0lab.com/payment/result`.
 - Balance recharge conversion: CNY 1 credits USD 1 of site balance.
 - Recharge range: CNY 10 to CNY 500 per order.
 - Recharge daily limit: CNY 1,000 per user.

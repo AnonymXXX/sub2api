@@ -194,6 +194,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		).Warn("openai_usage.pricing_missing_record_zero_cost", zap.Error(err))
 		cost = &CostBreakdown{BillingMode: string(BillingModeToken)}
 	}
+	if cost == nil {
+		return errors.New("calculate OpenAI usage cost returned nil result")
+	}
 
 	// Determine billing type
 	isSubscriptionBilling := subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
@@ -270,18 +273,16 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		videoDurationSeconds := NormalizeVideoBillingDurationSecondsOrDefault(result.VideoDurationSeconds)
 		usageLog.VideoDurationSeconds = &videoDurationSeconds
 	}
-	if cost != nil {
-		usageLog.InputCost = cost.InputCost
-		usageLog.OutputCost = cost.OutputCost
-		usageLog.ImageOutputCost = cost.ImageOutputCost
-		usageLog.CacheCreationCost = cost.CacheCreationCost
-		usageLog.CacheReadCost = cost.CacheReadCost
-		usageLog.TotalCost = cost.TotalCost
-		usageLog.ActualCost = cost.ActualCost
-	}
-	if isVideoUsage && (cost == nil || cost.BillingMode != string(BillingModeToken)) {
+	usageLog.InputCost = cost.InputCost
+	usageLog.OutputCost = cost.OutputCost
+	usageLog.ImageOutputCost = cost.ImageOutputCost
+	usageLog.CacheCreationCost = cost.CacheCreationCost
+	usageLog.CacheReadCost = cost.CacheReadCost
+	usageLog.TotalCost = cost.TotalCost
+	usageLog.ActualCost = cost.ActualCost
+	if isVideoUsage && cost.BillingMode != string(BillingModeToken) {
 		usageLog.RateMultiplier = videoMultiplier
-	} else if result.ImageCount > 0 && (cost == nil || cost.BillingMode != string(BillingModeToken)) {
+	} else if result.ImageCount > 0 && cost.BillingMode != string(BillingModeToken) {
 		usageLog.RateMultiplier = imageMultiplier
 	} else {
 		usageLog.RateMultiplier = multiplier
@@ -300,7 +301,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	usageLog.ChannelID = optionalInt64Ptr(input.ChannelID)
 	usageLog.ModelMappingChain = optionalTrimmedStringPtr(input.ModelMappingChain)
 	// 设置计费模式
-	if cost != nil && cost.BillingMode != "" {
+	if cost.BillingMode != "" {
 		billingMode := cost.BillingMode
 		usageLog.BillingMode = &billingMode
 	} else if isVideoUsage {

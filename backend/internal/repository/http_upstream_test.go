@@ -287,8 +287,10 @@ func (s *HTTPUpstreamSuite) TestOpenAICompactProfileUsesIndependentHeaderTimeout
 	require.NoError(s.T(), err)
 
 	require.NotSame(s.T(), ordinary, compact)
-	ordinaryTransport := ordinary.client.Transport.(*http.Transport)
-	compactTransport := compact.client.Transport.(*http.Transport)
+	ordinaryTransport, ordinaryOK := ordinary.client.Transport.(*http.Transport)
+	require.True(s.T(), ordinaryOK, "expected ordinary *http.Transport")
+	compactTransport, compactOK := compact.client.Transport.(*http.Transport)
+	require.True(s.T(), compactOK, "expected compact *http.Transport")
 	require.Equal(s.T(), 120*time.Second, ordinaryTransport.ResponseHeaderTimeout)
 	require.Equal(s.T(), 300*time.Second, compactTransport.ResponseHeaderTimeout)
 

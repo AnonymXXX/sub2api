@@ -178,29 +178,13 @@
                   "
                   class="flex flex-wrap items-center gap-x-1 gap-y-0.5"
                 >
+                  <span class="font-medium text-gray-600 dark:text-gray-300">{{
+                    t("admin.groups.quotaPerSubscription")
+                  }}</span>
                   <span v-if="row.daily_limit_usd" class="whitespace-nowrap">
-                    <span
-                      v-if="usageLoading"
-                      class="font-medium text-gray-400 dark:text-gray-500"
-                      >—</span
-                    >
-                    <span
-                      v-else
-                      :class="
-                        getQuotaUsageClass(
-                          usageMap.get(row.id)?.today_cost ?? 0,
-                          row.daily_limit_usd
-                        )
-                      "
-                      >{{
-                        formatUsd(usageMap.get(row.id)?.today_cost ?? 0)
-                      }}</span
-                    >
-                    <span class="text-gray-400 dark:text-gray-500">
-                      / {{ formatUsd(row.daily_limit_usd) }}/{{
-                        t("admin.groups.limitDay")
-                      }}</span
-                    >
+                    {{ formatUsd(row.daily_limit_usd) }}/{{
+                      t("admin.groups.limitDay")
+                    }}
                   </span>
                   <span
                     v-if="
@@ -229,15 +213,54 @@
                 <span v-else class="text-gray-400 dark:text-gray-500">{{
                   t("admin.groups.subscription.noLimit")
                 }}</span>
-                <div class="text-gray-400 dark:text-gray-500">
-                  {{ t("admin.groups.usageTotal") }}
-                  <span class="ml-1 font-medium text-gray-600 dark:text-gray-300"
-                    >{{
-                      usageLoading
-                        ? "—"
-                        : formatUsd(usageMap.get(row.id)?.total_cost ?? 0)
-                    }}</span
+                <div
+                  v-if="row.daily_limit_usd"
+                  class="flex flex-wrap items-center gap-x-1 text-gray-400 dark:text-gray-500"
+                >
+                  <span v-if="usageLoading">—</span>
+                  <template
+                    v-else-if="
+                      (usageMap.get(row.id)?.active_subscription_count ?? 0) > 0
+                    "
                   >
+                    <span>{{ t("admin.groups.highestDailyUsage") }}</span>
+                    <span
+                      :class="
+                        getQuotaUsageClass(
+                          usageMap.get(row.id)?.max_daily_usage ?? 0,
+                          row.daily_limit_usd
+                        )
+                      "
+                      >{{
+                        formatUsd(usageMap.get(row.id)?.max_daily_usage ?? 0)
+                      }}</span
+                    >
+                    <span>/ {{ formatUsd(row.daily_limit_usd) }}</span>
+                    <span class="text-gray-300 dark:text-gray-600">·</span>
+                    <span>{{
+                      t("admin.groups.activeSubscriptions", {
+                        count:
+                          usageMap.get(row.id)?.active_subscription_count ?? 0,
+                      })
+                    }}</span>
+                    <span
+                      v-if="
+                        (usageMap.get(row.id)?.daily_limit_reached_count ?? 0) > 0
+                      "
+                      class="font-semibold text-red-600 dark:text-red-400"
+                    >
+                      ·
+                      {{
+                        t("admin.groups.dailyLimitReachedSubscriptions", {
+                          count:
+                            usageMap.get(row.id)?.daily_limit_reached_count ?? 0,
+                        })
+                      }}
+                    </span>
+                  </template>
+                  <span v-else>{{
+                    t("admin.groups.noActiveSubscriptions")
+                  }}</span>
                 </div>
               </div>
             </div>
@@ -3869,6 +3892,9 @@ const loading = ref(false);
 type GroupUsageSummary = {
   today_cost: number;
   total_cost: number;
+  active_subscription_count: number;
+  max_daily_usage: number;
+  daily_limit_reached_count: number;
 };
 
 const usageMap = ref<Map<number, GroupUsageSummary>>(new Map());
@@ -4606,6 +4632,9 @@ const loadUsageSummary = async () => {
       map.set(item.group_id, {
         today_cost: item.today_cost,
         total_cost: item.total_cost,
+        active_subscription_count: item.active_subscription_count ?? 0,
+        max_daily_usage: item.max_daily_usage ?? 0,
+        daily_limit_reached_count: item.daily_limit_reached_count ?? 0,
       });
     }
     usageMap.value = map;

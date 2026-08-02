@@ -709,13 +709,52 @@ func (r *usageLogRepository) GetUserBreakdownStats(ctx context.Context, startTim
 // or a materialized view / pre-aggregation table for cumulative costs.
 func (r *usageLogRepository) GetAllGroupUsageSummary(ctx context.Context, todayStart time.Time) ([]usagestats.GroupUsageSummary, error) {
 	query := `
+		WITH usage_summary AS (
+			SELECT
+				group_id,
+				COALESCE(SUM(actual_cost), 0) AS total_cost,
+				COALESCE(SUM(CASE WHEN created_at >= $1 THEN actual_cost ELSE 0 END), 0) AS today_cost
+			FROM usage_logs
+			WHERE group_id IS NOT NULL
+			GROUP BY group_id
+		),
+		subscription_summary AS (
+			SELECT
+				us.group_id,
+				COUNT(*) AS active_subscription_count,
+				COALESCE(MAX(effective.daily_usage), 0) AS max_daily_usage,
+				COUNT(*) FILTER (
+					WHERE g.daily_limit_usd IS NOT NULL
+						AND g.daily_limit_usd > 0
+						AND effective.daily_usage >= g.daily_limit_usd
+				) AS daily_limit_reached_count
+			FROM user_subscriptions us
+			JOIN groups g ON g.id = us.group_id AND g.deleted_at IS NULL
+			CROSS JOIN LATERAL (
+				SELECT CASE
+					WHEN us.daily_window_start IS NULL OR (
+						us.expires_at > us.starts_at + INTERVAL '1 day'
+						AND us.daily_window_start <= NOW() - INTERVAL '24 hours'
+					) THEN 0
+					ELSE us.daily_usage_usd
+				END AS daily_usage
+			) effective
+			WHERE us.deleted_at IS NULL
+				AND us.status = 'active'
+				AND us.starts_at <= NOW()
+				AND us.expires_at > NOW()
+			GROUP BY us.group_id
+		)
 		SELECT
 			g.id AS group_id,
-			COALESCE(SUM(ul.actual_cost), 0) AS total_cost,
-			COALESCE(SUM(CASE WHEN ul.created_at >= $1 THEN ul.actual_cost ELSE 0 END), 0) AS today_cost
+			COALESCE(u.total_cost, 0) AS total_cost,
+			COALESCE(u.today_cost, 0) AS today_cost,
+			COALESCE(s.active_subscription_count, 0) AS active_subscription_count,
+			COALESCE(s.max_daily_usage, 0) AS max_daily_usage,
+			COALESCE(s.daily_limit_reached_count, 0) AS daily_limit_reached_count
 		FROM groups g
-		LEFT JOIN usage_logs ul ON ul.group_id = g.id
-		GROUP BY g.id
+		LEFT JOIN usage_summary u ON u.group_id = g.id
+		LEFT JOIN subscription_summary s ON s.group_id = g.id
 	`
 
 	rows, err := r.sql.QueryContext(ctx, query, todayStart)
@@ -726,7 +765,14 @@ func (r *usageLogRepository) GetAllGroupUsageSummary(ctx context.Context, todayS
 	var results []usagestats.GroupUsageSummary
 	for rows.Next() {
 		var row usagestats.GroupUsageSummary
-		if err := rows.Scan(&row.GroupID, &row.TotalCost, &row.TodayCost); err != nil {
+		if err := rows.Scan(
+			&row.GroupID,
+			&row.TotalCost,
+			&row.TodayCost,
+			&row.ActiveSubscriptionCount,
+			&row.MaxDailyUsage,
+			&row.DailyLimitReachedCount,
+		); err != nil {
 			return nil, err
 		}
 		results = append(results, row)

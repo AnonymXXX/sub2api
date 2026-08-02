@@ -40,6 +40,12 @@ const messages: Record<string, string> = {
   'admin.groups.columns.usage': 'Usage',
   'admin.groups.columns.status': 'Status',
   'admin.groups.columns.actions': 'Actions',
+  'admin.groups.subscription.subscription': 'Subscription (Quota)',
+  'admin.groups.quotaPerSubscription': 'Per subscription',
+  'admin.groups.highestDailyUsage': 'Highest subscription',
+  'admin.groups.activeSubscriptions': '{count} active subscriptions',
+  'admin.groups.dailyLimitReachedSubscriptions': '{count} at daily limit',
+  'admin.groups.limitDay': 'd',
 }
 
 vi.mock('@/api/admin', () => ({
@@ -80,7 +86,13 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => messages[key] ?? key,
+      t: (key: string, params?: Record<string, string | number>) => {
+        let value = messages[key] ?? key
+        for (const [name, replacement] of Object.entries(params ?? {})) {
+          value = value.replace(`{${name}}`, String(replacement))
+        }
+        return value
+      },
     }),
   }
 })
@@ -147,6 +159,13 @@ const DataTableStub = {
     <div>
       <div data-test="columns">{{ columns.map((col) => col.key).join(',') }}</div>
       <div data-test="rows">{{ data.map((row) => row.name).join(',') }}</div>
+      <div
+        v-for="row in data"
+        :key="row.id"
+        :data-test="'billing-cell-' + row.id"
+      >
+        <slot name="cell-billing_type" :row="row" :value="row.subscription_type" />
+      </div>
     </div>
   `,
 }
@@ -266,6 +285,79 @@ describe('admin GroupsView column settings', () => {
       'status',
       'actions',
     ])
+  })
+
+  it('separates group usage from per-subscription quota progress', async () => {
+    listGroups.mockResolvedValue({
+      items: [
+        createGroup({
+          id: 10,
+          name: 'OpenAI Light',
+          platform: 'openai',
+          subscription_type: 'subscription',
+          daily_limit_usd: 75,
+          weekly_limit_usd: 225,
+          monthly_limit_usd: 500,
+        }),
+      ],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+    getUsageSummary.mockResolvedValue([
+      {
+        group_id: 10,
+        today_cost: 76.76,
+        total_cost: 289.8,
+        active_subscription_count: 9,
+        max_daily_usage: 44.83,
+        daily_limit_reached_count: 0,
+      },
+    ])
+
+    const wrapper = await mountView()
+    const billingCell = wrapper.get('[data-test="billing-cell-10"]')
+
+    expect(billingCell.text()).toContain('Per subscription')
+    expect(billingCell.text()).toContain('$75.00/d')
+    expect(billingCell.text()).toContain('Highest subscription')
+    expect(billingCell.text()).toContain('$44.83')
+    expect(billingCell.text()).toContain('9 active subscriptions')
+    expect(billingCell.text()).not.toContain('$76.76 / $75.00')
+    expect(billingCell.find('.text-red-600').exists()).toBe(false)
+  })
+
+  it('marks quota progress red only when an individual subscription reaches the limit', async () => {
+    listGroups.mockResolvedValue({
+      items: [
+        createGroup({
+          id: 10,
+          subscription_type: 'subscription',
+          daily_limit_usd: 75,
+        }),
+      ],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+    getUsageSummary.mockResolvedValue([
+      {
+        group_id: 10,
+        today_cost: 160,
+        total_cost: 500,
+        active_subscription_count: 9,
+        max_daily_usage: 75,
+        daily_limit_reached_count: 2,
+      },
+    ])
+
+    const wrapper = await mountView()
+    const billingCell = wrapper.get('[data-test="billing-cell-10"]')
+
+    expect(billingCell.find('.text-red-600').text()).toContain('$75.00')
+    expect(billingCell.text()).toContain('2 at daily limit')
   })
 
   it('applies saved hidden columns on mount and ignores unknown keys', async () => {

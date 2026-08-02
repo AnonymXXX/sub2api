@@ -9,8 +9,20 @@ import type { PaginatedResponse } from '@/types'
 
 export type OpsQueryMode = 'auto' | 'raw' | 'preagg'
 
+export interface OpsViewerConfig {
+  ops_monitoring_enabled: boolean
+  ops_realtime_monitoring_enabled: boolean
+  ops_query_mode_default: OpsQueryMode
+  groups: Array<{ id: number; name: string; platform: string }>
+}
+
 export interface OpsRequestOptions {
   signal?: AbortSignal
+}
+
+export async function getViewerConfig(): Promise<OpsViewerConfig> {
+  const { data } = await apiClient.get<OpsViewerConfig>('/admin/ops/viewer-config')
+  return data
 }
 
 export type OpsUpstreamErrorEvent = {
@@ -1312,6 +1324,7 @@ async function updateMetricThresholds(thresholds: OpsMetricThresholds): Promise<
 }
 
 export const opsAPI = {
+  getViewerConfig,
   getDashboardSnapshotV2,
   getDashboardOverview,
   getThroughputTrend,

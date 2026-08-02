@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 import UsageView from '../UsageView.vue'
 
-const { list, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs } = vi.hoisted(() => {
+const { list, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs, authState } = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -17,6 +17,7 @@ const { list, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs } =
     getById: vi.fn(),
     getModelStats: vi.fn(),
     listErrorLogs: vi.fn(),
+    authState: { isAdmin: true },
   }
 })
 
@@ -67,6 +68,10 @@ vi.mock('@/stores/app', () => ({
     showSuccess: vi.fn(),
     showInfo: vi.fn(),
   }),
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => authState,
 }))
 
 vi.mock('@/utils/format', () => ({
@@ -128,6 +133,7 @@ describe('admin UsageView distribution metric toggles', () => {
     getSnapshotV2.mockReset()
     getById.mockReset()
     getModelStats.mockReset()
+    authState.isAdmin = true
 
     list.mockResolvedValue({
       items: [],
@@ -241,6 +247,28 @@ describe('admin UsageView distribution metric toggles', () => {
     expect(groupChart.find('.metric').text()).toBe('actual_cost')
     expect(getSnapshotV2).toHaveBeenCalledTimes(1)
   })
+
+  it('blocks balance history and cleanup handlers for operators', async () => {
+    authState.isAdmin = false
+    const wrapper = mount(UsageView, {
+      global: { stubs: {
+        AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
+        UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
+        UserBalanceHistoryModal: true, Pagination: true, Select: true,
+        DateRangePicker: true, Icon: true, TokenUsageTrend: true,
+        ModelDistributionChart: true, GroupDistributionChart: true,
+        EndpointDistributionChart: true, UserTokenRanking: true,
+      } },
+    })
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    await (wrapper.vm as any).handleUserClick(2)
+    ;(wrapper.vm as any).openCleanupDialog()
+
+    expect(getById).not.toHaveBeenCalled()
+    expect((wrapper.vm as any).cleanupDialogVisible).toBe(false)
+  })
 })
 
 describe('admin UsageView handleUserClick', () => {
@@ -250,6 +278,7 @@ describe('admin UsageView handleUserClick', () => {
     getStats.mockReset()
     getSnapshotV2.mockReset()
     getById.mockReset()
+    authState.isAdmin = true
 
     list.mockResolvedValue({ items: [], total: 0, pages: 0 })
     getStats.mockResolvedValue({

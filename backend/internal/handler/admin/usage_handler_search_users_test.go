@@ -16,7 +16,8 @@ import (
 // 捕获 ListUsers 入参、返回一个已删用户的 admin service 桩。
 type searchUsersAdminStub struct {
 	service.AdminService
-	gotFilters service.UserListFilters
+	gotFilters       service.UserListFilters
+	gotAccountSearch string
 }
 
 func (s *searchUsersAdminStub) ListUsers(ctx context.Context, page, pageSize int, filters service.UserListFilters, sortBy, sortOrder string) ([]service.User, int64, error) {
@@ -26,6 +27,15 @@ func (s *searchUsersAdminStub) ListUsers(ctx context.Context, page, pageSize int
 		{ID: 1, Email: "active@test.com"},
 		{ID: 2, Email: "deleted@test.com", DeletedAt: &ts},
 	}, 2, nil
+}
+
+func (s *searchUsersAdminStub) ListAccounts(_ context.Context, _, _ int, _, _, _, search string, _ int64, _, _, _ string) ([]service.Account, int64, error) {
+	s.gotAccountSearch = search
+	return []service.Account{{ID: 11, Name: "account-one", Credentials: map[string]any{"secret": "hidden"}}}, 1, nil
+}
+
+func (s *searchUsersAdminStub) GetAllGroupsIncludingInactive(context.Context) ([]service.Group, error) {
+	return []service.Group{{ID: 12, Name: "group-one", Description: "hidden"}}, nil
 }
 
 func TestAdminUsageSearchUsers_IncludesDeletedAndFlags(t *testing.T) {
@@ -53,4 +63,32 @@ func TestAdminUsageSearchUsers_IncludesDeletedAndFlags(t *testing.T) {
 	require.Len(t, resp.Data, 2)
 	require.False(t, resp.Data[0].Deleted)
 	require.True(t, resp.Data[1].Deleted, "已删用户必须标记 deleted=true")
+}
+
+func TestAdminUsageFilterOptionsReturnMinimalFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stub := &searchUsersAdminStub{}
+	handler := NewUsageHandler(nil, nil, stub, nil)
+	router := gin.New()
+	router.GET("/admin/usage/search-accounts", handler.SearchAccounts)
+	router.GET("/admin/usage/groups", handler.ListGroups)
+
+	for _, path := range []string{
+		"/admin/usage/search-accounts?q=account",
+		"/admin/usage/groups",
+	} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.NotContains(t, rec.Body.String(), "hidden")
+		var response struct {
+			Data []map[string]any `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+		require.Len(t, response.Data, 1)
+		require.Len(t, response.Data[0], 2)
+		require.Contains(t, response.Data[0], "id")
+		require.Contains(t, response.Data[0], "name")
+	}
+	require.Equal(t, "account", stub.gotAccountSearch)
 }

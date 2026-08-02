@@ -83,7 +83,7 @@
           </button>
         </div>
 
-        <UsageFilters v-model="filters" ref="usageFiltersRef" flat :mode="activeTab" class="border-b border-gray-100 dark:border-dark-700/50" :start-date="startDate" :end-date="endDate" :exporting="exporting" :model-options="modelNameOptions" @change="applyFilters" @refresh="refreshData" @reset="resetFilters" @cleanup="openCleanupDialog" @export="exportToExcel">
+        <UsageFilters v-model="filters" ref="usageFiltersRef" flat :mode="activeTab" class="border-b border-gray-100 dark:border-dark-700/50" :start-date="startDate" :end-date="endDate" :exporting="exporting" :model-options="modelNameOptions" :can-cleanup="authStore.isAdmin" @change="applyFilters" @refresh="refreshData" @reset="resetFilters" @cleanup="openCleanupDialog" @export="exportToExcel">
           <template #after-reset>
             <div v-if="activeTab !== 'ranking'" class="relative" ref="columnDropdownRef">
               <button
@@ -129,6 +129,7 @@
             :server-side-sort="true"
             :default-sort-key="'created_at'"
             :default-sort-order="'desc'"
+            :user-clickable="authStore.isAdmin"
             @sort="handleSort"
             @userClick="handleUserClick"
             @ipGeoBatchFailed="handleIpGeoBatchFailed"
@@ -141,7 +142,7 @@
             :rows="errRows" :total="errTotal" :loading="errLoading"
             :page="errPage" :page-size="errPageSize"
             :visible-column-keys="errVisibleColumnKeys"
-            user-clickable
+            :user-clickable="authStore.isAdmin"
             @userClick="handleUserClick"
             @openErrorDetail="openError"
             @sort="onErrSort"
@@ -166,6 +167,7 @@
   </AppLayout>
   <UsageExportProgress :show="exportProgress.show" :progress="exportProgress.progress" :current="exportProgress.current" :total="exportProgress.total" :estimated-time="exportProgress.estimatedTime" @cancel="cancelExport" />
   <UsageCleanupDialog
+    v-if="authStore.isAdmin"
     :show="cleanupDialogVisible"
     :filters="filters"
     :start-date="startDate"
@@ -174,6 +176,7 @@
   />
   <!-- Balance history modal triggered from usage table user click -->
   <UserBalanceHistoryModal
+    v-if="authStore.isAdmin"
     :show="showBalanceHistoryModal"
     :user="balanceHistoryUser"
     :hide-actions="true"
@@ -186,7 +189,10 @@ import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { saveAs } from 'file-saver'
 import { useRoute } from 'vue-router'
-import { useAppStore } from '@/stores/app'; import { adminAPI } from '@/api/admin'; import { adminUsageAPI } from '@/api/admin/usage'
+import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
+import { adminAPI } from '@/api/admin'
+import { adminUsageAPI } from '@/api/admin/usage'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatReasoningEffort } from '@/utils/format'
 import { resolveUsageRequestType, requestTypeToLegacyStream } from '@/utils/usageRequestType'
@@ -207,6 +213,7 @@ import type { AdminUsageLog, TrendDataPoint, ModelStat, GroupStat, EndpointStat,
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const authStore = useAuthStore()
 type DistributionMetric = 'tokens' | 'actual_cost'
 type EndpointSource = 'inbound' | 'upstream' | 'path'
 type ModelDistributionSource = 'requested' | 'upstream' | 'mapping'
@@ -253,6 +260,7 @@ const modelNameOptions = computed(() =>
 )
 
 const handleUserClick = async (userId: number) => {
+  if (!authStore.isAdmin) return
   try {
     const user = await adminAPI.users.getById(userId, true)
     balanceHistoryUser.value = user
@@ -533,7 +541,10 @@ const handleIpGeoBatchFailed = () => {
   appStore.showError(t('usage.ipGeo.batchFailed'))
 }
 const cancelExport = () => exportAbortController?.abort()
-const openCleanupDialog = () => { cleanupDialogVisible.value = true }
+const openCleanupDialog = () => {
+  if (!authStore.isAdmin) return
+  cleanupDialogVisible.value = true
+}
 const getRequestTypeLabel = (log: AdminUsageLog): string => {
   const requestType = resolveUsageRequestType(log)
   if (requestType === 'cyber') return t('usage.cyber')

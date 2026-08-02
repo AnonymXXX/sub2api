@@ -20,6 +20,7 @@ type GroupHandler struct {
 	adminService         service.AdminService
 	dashboardService     *service.DashboardService
 	groupCapacityService *service.GroupCapacityService
+	settingService       *service.SettingService
 }
 
 type optionalLimitField struct {
@@ -72,12 +73,55 @@ func (f optionalLimitField) ToServiceInput() *float64 {
 }
 
 // NewGroupHandler creates a new admin group handler
-func NewGroupHandler(adminService service.AdminService, dashboardService *service.DashboardService, groupCapacityService *service.GroupCapacityService) *GroupHandler {
+func NewGroupHandler(adminService service.AdminService, dashboardService *service.DashboardService, groupCapacityService *service.GroupCapacityService, settingService *service.SettingService) *GroupHandler {
 	return &GroupHandler{
 		adminService:         adminService,
 		dashboardService:     dashboardService,
 		groupCapacityService: groupCapacityService,
+		settingService:       settingService,
 	}
+}
+
+type opsViewerGroup struct {
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	Platform string `json:"platform"`
+}
+
+type opsViewerConfig struct {
+	OpsMonitoringEnabled         bool             `json:"ops_monitoring_enabled"`
+	OpsRealtimeMonitoringEnabled bool             `json:"ops_realtime_monitoring_enabled"`
+	OpsQueryModeDefault          string           `json:"ops_query_mode_default"`
+	Groups                       []opsViewerGroup `json:"groups"`
+}
+
+// GetOpsViewerConfig returns only the feature flags and group labels required
+// to render the read-only ops dashboard.
+func (h *GroupHandler) GetOpsViewerConfig(c *gin.Context) {
+	if h == nil || h.adminService == nil || h.settingService == nil {
+		response.InternalError(c, "Ops viewer config is unavailable")
+		return
+	}
+	groups, err := h.adminService.GetAllGroups(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	settings, err := h.settingService.GetAllSettings(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	items := make([]opsViewerGroup, 0, len(groups))
+	for i := range groups {
+		items = append(items, opsViewerGroup{ID: groups[i].ID, Name: groups[i].Name, Platform: groups[i].Platform})
+	}
+	response.Success(c, opsViewerConfig{
+		OpsMonitoringEnabled:         settings.OpsMonitoringEnabled,
+		OpsRealtimeMonitoringEnabled: settings.OpsRealtimeMonitoringEnabled,
+		OpsQueryModeDefault:          settings.OpsQueryModeDefault,
+		Groups:                       items,
+	})
 }
 
 // CreateGroupRequest represents create group request

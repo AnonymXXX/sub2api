@@ -11,6 +11,7 @@ import { formatDateTime } from '../utils/opsFormatters'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const props = withDefaults(defineProps<{ readOnly?: boolean }>(), { readOnly: false })
 
 const PAGE_SIZE = 10
 
@@ -262,6 +263,7 @@ function durationToUntilRFC3339(duration: string): string {
 }
 
 async function silenceAlert() {
+  if (props.readOnly) return
   const ev = selected.value
   if (!ev) return
   if (detailActionLoading.value) return
@@ -291,6 +293,7 @@ async function silenceAlert() {
 }
 
 async function manualResolve() {
+  if (props.readOnly) return
   if (!selected.value) return
   if (detailActionLoading.value) return
   detailActionLoading.value = true
@@ -356,13 +359,13 @@ const empty = computed(() => events.value.length === 0 && !loading.value)
 
 <template>
   <div class="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-gray-900/5 dark:bg-dark-800 dark:ring-dark-700">
-    <div class="mb-4 flex items-start justify-between gap-4">
+    <div class="mb-4 flex flex-col items-start gap-4 xl:flex-row xl:justify-between">
       <div>
         <h3 class="text-sm font-bold text-gray-900 dark:text-white">{{ t('admin.ops.alertEvents.title') }}</h3>
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.ops.alertEvents.description') }}</p>
       </div>
 
-      <div class="flex items-center gap-2">
+      <div class="flex w-full flex-wrap items-center gap-2 xl:w-auto xl:justify-end">
         <Select :model-value="timeRange" :options="timeRangeOptions" class="w-[120px]" @change="timeRange = String($event || '24h')" />
         <Select :model-value="severity" :options="severityOptions" class="w-[88px]" @change="severity = String($event || '')" />
         <Select :model-value="status" :options="statusOptions" class="w-[110px]" @change="status = String($event || '')" />
@@ -535,7 +538,7 @@ const empty = computed(() => events.value.length === 0 && !loading.value)
               </div>
             </div>
 
-            <div class="flex flex-wrap gap-2">
+            <div v-if="!props.readOnly" class="flex flex-wrap gap-2">
               <div class="flex items-center gap-2 rounded-lg bg-white px-2 py-1 ring-1 ring-gray-200 dark:bg-dark-800 dark:ring-dark-700">
                 <span class="text-[11px] font-bold text-gray-600 dark:text-gray-300">{{ t('admin.ops.alertEvents.detail.silence') }}</span>
                 <Select
@@ -645,4 +648,3 @@ const empty = computed(() => events.value.length === 0 && !loading.value)
     </BaseDialog>
   </div>
 </template>
-

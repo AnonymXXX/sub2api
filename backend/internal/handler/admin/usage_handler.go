@@ -424,6 +424,52 @@ func (h *UsageHandler) SearchAPIKeys(c *gin.Context) {
 	response.Success(c, result)
 }
 
+// SearchAccounts returns only account identifiers and names needed by usage filters.
+// GET /api/v1/admin/usage/search-accounts
+func (h *UsageHandler) SearchAccounts(c *gin.Context) {
+	keyword := strings.TrimSpace(c.Query("q"))
+	if keyword == "" {
+		response.Success(c, []any{})
+		return
+	}
+
+	accounts, _, err := h.adminService.ListAccounts(c.Request.Context(), 1, 30, "", "", "", keyword, 0, "", "name", "asc")
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	type simpleAccount struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+	}
+	result := make([]simpleAccount, len(accounts))
+	for i := range accounts {
+		result[i] = simpleAccount{ID: accounts[i].ID, Name: accounts[i].Name}
+	}
+	response.Success(c, result)
+}
+
+// ListGroups returns only group identifiers and names needed by usage filters.
+// GET /api/v1/admin/usage/groups
+func (h *UsageHandler) ListGroups(c *gin.Context) {
+	groups, err := h.adminService.GetAllGroupsIncludingInactive(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	type simpleGroup struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+	}
+	result := make([]simpleGroup, len(groups))
+	for i := range groups {
+		result[i] = simpleGroup{ID: groups[i].ID, Name: groups[i].Name}
+	}
+	response.Success(c, result)
+}
+
 // ListCleanupTasks handles listing usage cleanup tasks
 // GET /api/v1/admin/usage/cleanup-tasks
 func (h *UsageHandler) ListCleanupTasks(c *gin.Context) {

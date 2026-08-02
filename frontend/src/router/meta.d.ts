@@ -4,6 +4,7 @@
  */
 
 import 'vue-router'
+import type { AdminPermission } from '@/types'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -18,6 +19,9 @@ declare module 'vue-router' {
      * @default false
      */
     requiresAdmin?: boolean
+
+    /** Required read capability for routes shared with the operator role. */
+    requiresAdminPermission?: AdminPermission
 
     /**
      * Page title for this route

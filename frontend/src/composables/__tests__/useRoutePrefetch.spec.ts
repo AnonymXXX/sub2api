@@ -25,6 +25,8 @@ const createMockRouter = (): Router => {
 
   const routes: Partial<RouteRecordNormalized>[] = [
     { path: '/admin/dashboard', components: { default: mockImportFn } },
+    { path: '/admin/ops', components: { default: mockImportFn } },
+    { path: '/admin/usage', components: { default: mockImportFn } },
     { path: '/admin/accounts', components: { default: mockImportFn } },
     { path: '/admin/users', components: { default: mockImportFn } },
     { path: '/admin/groups', components: { default: mockImportFn } },
@@ -190,7 +192,7 @@ describe('useRoutePrefetch', () => {
   describe('预加载映射表', () => {
     it('管理员预加载映射表应该包含正确的路由', () => {
       expect(_adminPrefetchMap).toHaveProperty('/admin/dashboard')
-      expect(_adminPrefetchMap['/admin/dashboard']).toHaveLength(2)
+      expect(_adminPrefetchMap['/admin/dashboard']).toEqual(['/admin/ops', '/admin/usage'])
     })
 
     it('用户预加载映射表应该包含正确的路由', () => {

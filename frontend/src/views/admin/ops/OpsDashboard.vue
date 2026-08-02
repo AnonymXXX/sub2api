@@ -25,6 +25,8 @@
         :fullscreen="isFullscreen"
         :custom-start-time="customStartTime"
         :custom-end-time="customEndTime"
+        :groups="viewerGroups"
+        :read-only="readOnly"
         @update:time-range="onTimeRangeChange"
         @update:platform="onPlatformChange"
         @update:group="onGroupChange"
@@ -94,20 +96,21 @@
       </div>
 
       <!-- Alert Events -->
-      <OpsAlertEventsCard v-if="opsEnabled && showAlertEvents && !(loading && !hasLoadedOnce)" />
+      <OpsAlertEventsCard v-if="opsEnabled && showAlertEvents && !(loading && !hasLoadedOnce)" :read-only="readOnly" />
 
       <!-- System Logs -->
       <OpsSystemLogTable
         v-if="opsEnabled && !(loading && !hasLoadedOnce)"
         :platform-filter="platform"
         :refresh-token="dashboardRefreshToken"
+        :read-only="readOnly"
       />
 
       <!-- Settings Dialog (hidden in fullscreen mode) -->
       <template v-if="!isFullscreen">
-        <OpsSettingsDialog :show="showSettingsDialog" @close="showSettingsDialog = false" @saved="onSettingsSaved" />
+        <OpsSettingsDialog v-if="!readOnly" :show="showSettingsDialog" @close="showSettingsDialog = false" @saved="onSettingsSaved" />
 
-        <BaseDialog :show="showAlertRulesCard" :title="t('admin.ops.alertRules.title')" width="extra-wide" @close="showAlertRulesCard = false">
+        <BaseDialog v-if="!readOnly" :show="showAlertRulesCard" :title="t('admin.ops.alertRules.title')" width="extra-wide" @close="showAlertRulesCard = false">
           <OpsAlertRulesCard />
         </BaseDialog>
 
@@ -152,7 +155,7 @@ import {
   type OpsThroughputTrendResponse,
   type OpsMetricThresholds
 } from '@/api/admin/ops'
-import { useAdminSettingsStore, useAppStore } from '@/stores'
+import { useAdminSettingsStore, useAppStore, useAuthStore } from '@/stores'
 import OpsDashboardHeader from './components/OpsDashboardHeader.vue'
 import OpsDashboardSkeleton from './components/OpsDashboardSkeleton.vue'
 import OpsConcurrencyCard from './components/OpsConcurrencyCard.vue'
@@ -173,10 +176,13 @@ import OpsAlertRulesCard from './components/OpsAlertRulesCard.vue'
 const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
+const authStore = useAuthStore()
 const adminSettingsStore = useAdminSettingsStore()
 const { t } = useI18n()
 
 const opsEnabled = computed(() => adminSettingsStore.opsMonitoringEnabled)
+const readOnly = computed(() => authStore.isOperator)
+const viewerGroups = ref<Array<{ id: number; name: string; platform: string }>>([])
 
 type TimeRange = '5m' | '30m' | '1h' | '6h' | '24h' | 'custom'
 const allowedTimeRanges = new Set<TimeRange>(['5m', '30m', '1h', '6h', '24h', 'custom'])
@@ -293,12 +299,12 @@ const applyRouteQueryToState = () => {
 
   // Deep links
   const openRules = readQueryString(QUERY_KEYS.openAlertRules)
-  if (openRules === '1' || openRules === 'true') {
+  if (!readOnly.value && (openRules === '1' || openRules === 'true')) {
     showAlertRulesCard.value = true
   }
 
   const ruleID = readQueryNumber(QUERY_KEYS.alertRuleId)
-  if (typeof ruleID === 'number' && ruleID > 0) {
+  if (!readOnly.value && typeof ruleID === 'number' && ruleID > 0) {
     showAlertRulesCard.value = true
   }
 
@@ -774,9 +780,21 @@ onMounted(async () => {
   // Fullscreen mode: listen for ESC key
   window.addEventListener('keydown', handleKeydown)
 
-  await adminSettingsStore.fetch()
+  let viewerConfig
+  try {
+    viewerConfig = await opsAPI.getViewerConfig()
+  } catch (err) {
+    console.error('[OpsDashboard] Failed to load viewer config', err)
+    errorMessage.value = t('admin.ops.loadFailed')
+    loading.value = false
+    return
+  }
+  viewerGroups.value = viewerConfig.groups || []
+  adminSettingsStore.setOpsMonitoringEnabledLocal(viewerConfig.ops_monitoring_enabled)
+  adminSettingsStore.setOpsRealtimeMonitoringEnabledLocal(viewerConfig.ops_realtime_monitoring_enabled)
+  adminSettingsStore.setOpsQueryModeDefaultLocal(viewerConfig.ops_query_mode_default)
   if (!adminSettingsStore.opsMonitoringEnabled) {
-    await router.replace('/admin/settings')
+    await router.replace(authStore.isAdmin ? '/admin/settings' : '/admin/dashboard')
     return
   }
 

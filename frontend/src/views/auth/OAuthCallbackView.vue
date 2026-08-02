@@ -248,6 +248,11 @@ function sanitizeRedirectPath(path: string | null | undefined): string {
   return path
 }
 
+function resolvePostAuthRedirect(path: string | null | undefined): string {
+  const redirect = sanitizeRedirectPath(path)
+  return redirect === '/dashboard' ? authStore.homePath : redirect
+}
+
 function readPendingEmailOAuthProvider(): 'github' | 'google' | null {
   if (typeof window === 'undefined') return null
   const provider = window.sessionStorage.getItem(EMAIL_OAUTH_PENDING_PROVIDER_KEY)
@@ -279,7 +284,7 @@ async function finalizeTokenResponse(tokenResponse: OAuthTokenResponse, redirect
   }
   clearAllAffiliateReferralCodes()
   appStore.showSuccess(t('auth.loginSuccess'))
-  await router.replace(sanitizeRedirectPath(redirect))
+  await router.replace(resolvePostAuthRedirect(redirect))
 }
 
 function hasOAuthTokenResponse(value: Partial<OAuthTokenResponse>): value is OAuthTokenResponse {

@@ -43,6 +43,14 @@ const fakeAdminUser = {
   role: 'admin' as const,
 }
 
+const fakeOperatorUser = {
+  ...fakeUser,
+  id: 3,
+  username: 'operator',
+  email: 'operator@example.com',
+  role: 'operator' as const,
+}
+
 const fakeAuthResponse = {
   access_token: 'test-token-123',
   refresh_token: 'refresh-token-456',
@@ -339,6 +347,23 @@ describe('useAuthStore', () => {
     it('未登录时返回 false', () => {
       const store = useAuthStore()
       expect(store.isAdmin).toBe(false)
+    })
+  })
+
+  describe('operator permissions', () => {
+    it('uses the admin dashboard home and grants only read capabilities', async () => {
+      mockLogin.mockResolvedValue({ ...fakeAuthResponse, user: { ...fakeOperatorUser } })
+      const store = useAuthStore()
+
+      await store.login({ email: 'operator@example.com', password: '123456' })
+
+      expect(store.isAdmin).toBe(false)
+      expect(store.isOperator).toBe(true)
+      expect(store.canAccessAdminPanel).toBe(true)
+      expect(store.homePath).toBe('/admin/dashboard')
+      expect(store.hasAdminPermission('admin.dashboard.read')).toBe(true)
+      expect(store.hasAdminPermission('admin.ops.read')).toBe(true)
+      expect(store.hasAdminPermission('admin.usage.read')).toBe(true)
     })
   })
 

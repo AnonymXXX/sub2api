@@ -29,6 +29,7 @@
         <label class="input-label">{{ t('admin.users.form.roleLabel') }}</label>
         <select v-model="form.role" class="input">
           <option value="user">{{ t('admin.users.roles.user') }}</option>
+          <option value="operator">{{ t('admin.users.roles.operator') }}</option>
           <option value="admin">{{ t('admin.users.roles.admin') }}</option>
         </select>
       </div>
@@ -72,11 +73,12 @@ import { useI18n } from 'vue-i18n'; import { adminAPI } from '@/api/admin'
 import { useForm } from '@/composables/useForm'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
+import type { UserRole } from '@/types'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits(['close', 'success']); const { t } = useI18n()
 
-const form = reactive({ email: '', password: '', username: '', notes: '', role: 'user' as 'user' | 'admin', balance: '', concurrency: 1, rpm_limit: 0 })
+const form = reactive({ email: '', password: '', username: '', notes: '', role: 'user' as UserRole, balance: '', concurrency: 1, rpm_limit: 0 })
 
 const { loading, submit } = useForm({
   form,

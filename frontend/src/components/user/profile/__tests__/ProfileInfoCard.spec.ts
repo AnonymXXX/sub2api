@@ -32,6 +32,7 @@ vi.mock('vue-i18n', async (importOriginal) => {
         if (key === 'profile.concurrencyLimit') return 'Concurrency Limit'
         if (key === 'profile.memberSince') return 'Member Since'
         if (key === 'profile.administrator') return 'Administrator'
+        if (key === 'profile.operator') return 'Operator'
         if (key === 'profile.user') return 'User'
         if (key === 'profile.authBindings.providers.email') return 'Email'
         if (key === 'profile.authBindings.providers.linuxdo') return 'LinuxDo'
@@ -109,6 +110,15 @@ describe('ProfileInfoCard', () => {
 
     expect(wrapper.text()).toContain('Avatar synced from LinuxDo')
     expect(wrapper.text()).toContain('Username synced from LinuxDo')
+  })
+
+  it('renders the operator role label', () => {
+    const wrapper = mount(ProfileInfoCard, {
+      props: { user: createUser({ role: 'operator' }) },
+      global: { stubs: { Icon: true } }
+    })
+
+    expect(wrapper.text()).toContain('Operator')
   })
 
   it('uses the configured OIDC provider name in source hints', () => {

@@ -12,6 +12,7 @@ const {
   copyToClipboardMock,
   exchangePendingOAuthCompletionMock,
   apiPostMock,
+  authStoreState,
 } = vi.hoisted(() => ({
   routeState: {
     path: '/auth/callback',
@@ -30,6 +31,9 @@ const {
   copyToClipboardMock: vi.fn(),
   exchangePendingOAuthCompletionMock: vi.fn(),
   apiPostMock: vi.fn(),
+  authStoreState: {
+    homePath: '/dashboard',
+  },
 }))
 
 vi.mock('vue-router', () => ({
@@ -48,6 +52,9 @@ vi.mock('vue-i18n', () => ({
 vi.mock('@/stores', () => ({
   useAuthStore: () => ({
     setToken: (...args: any[]) => setTokenMock(...args),
+    get homePath() {
+      return authStoreState.homePath
+    },
   }),
   useAppStore: () => ({
     showError: (...args: any[]) => showErrorMock(...args),
@@ -96,6 +103,7 @@ describe('OAuthCallbackView', () => {
     exchangePendingOAuthCompletionMock.mockReset()
     apiPostMock.mockReset()
     window.sessionStorage.clear()
+    authStoreState.homePath = '/dashboard'
   })
 
   it('renders localized callback copy actions', () => {
@@ -222,5 +230,16 @@ describe('OAuthCallbackView', () => {
     })
     expect(apiPostMock.mock.calls[0][1]).not.toHaveProperty('email')
     expect(setTokenMock).toHaveBeenCalledWith('token-2')
+  })
+
+  it('redirects an operator OAuth login to the admin dashboard', async () => {
+    authStoreState.homePath = '/admin/dashboard'
+    locationState.current.hash = '#access_token=operator-token'
+
+    mount(OAuthCallbackView)
+    await vi.dynamicImportSettled()
+
+    expect(setTokenMock).toHaveBeenCalledWith('operator-token')
+    expect(routerReplaceMock).toHaveBeenCalledWith('/admin/dashboard')
   })
 })

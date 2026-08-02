@@ -442,6 +442,7 @@ export default {
       statusFilter: 'Status Filter',
       allStatuses: 'All Status',
       admin: 'Admin',
+      operator: 'Operator',
       user: 'User',
       disabled: 'Disabled',
       email: 'Email',
@@ -633,6 +634,7 @@ export default {
       totalRecharged: 'Total Recharged',
       roles: {
         admin: 'Admin',
+        operator: 'Operator',
         user: 'User'
       },
       // Settings Dropdowns

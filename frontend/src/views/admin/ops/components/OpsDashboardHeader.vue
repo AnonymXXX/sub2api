@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Select from '@/components/common/Select.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
-import { adminAPI } from '@/api'
 import { opsAPI, type OpsDashboardOverview, type OpsMetricThresholds, type OpsRealtimeTrafficSummary } from '@/api/admin/ops'
 import type { OpsRequestDetailsPreset } from './OpsRequestDetailsModal.vue'
 import { useAdminSettingsStore } from '@/stores'
@@ -27,6 +26,8 @@ interface Props {
   fullscreen?: boolean
   customStartTime?: string | null
   customEndTime?: string | null
+  groups?: Array<{ id: number; name: string; platform: string }>
+  readOnly?: boolean
 }
 
 interface Emits {
@@ -104,7 +105,7 @@ function formatCustomTimeRangeLabel(startTime: string, endTime: string): string 
   return `${formatDate(start)} ~ ${formatDate(end)}`
 }
 
-const groups = ref<Array<{ id: number; name: string; platform: string }>>([])
+const groups = computed(() => props.groups ?? [])
 
 const platformOptions = computed(() => [
   { value: '', label: t('common.all') },
@@ -150,16 +151,6 @@ watch(
     }
   }
 )
-
-onMounted(async () => {
-  try {
-    const list = await adminAPI.groups.getAll()
-    groups.value = list.map((g) => ({ id: g.id, name: g.name, platform: g.platform }))
-  } catch (e) {
-    console.error('[OpsDashboardHeader] Failed to load groups', e)
-    groups.value = []
-  }
-})
 
 function handlePlatformChange(val: string | number | boolean | null) {
   emit('update:platform', String(val || ''))
@@ -950,7 +941,7 @@ function handleToolbarRefresh() {
 
         <!-- Alert Rules Button (hidden in fullscreen) -->
         <button
-          v-if="!props.fullscreen"
+          v-if="!props.fullscreen && !props.readOnly"
           type="button"
           class="flex h-8 items-center gap-1.5 rounded-lg bg-blue-100 px-3 text-xs font-bold text-blue-700 transition-colors hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50"
           :title="t('admin.ops.alertRules.title')"
@@ -964,7 +955,7 @@ function handleToolbarRefresh() {
 
         <!-- Settings Button (hidden in fullscreen) -->
         <button
-          v-if="!props.fullscreen"
+          v-if="!props.fullscreen && !props.readOnly"
           type="button"
           class="flex h-8 items-center gap-1.5 rounded-lg bg-gray-100 px-3 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-300 dark:hover:bg-dark-600"
           :title="t('admin.ops.settings.title')"

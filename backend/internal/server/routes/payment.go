@@ -71,6 +71,7 @@ func RegisterPaymentRoutes(
 	adminGroup := v1.Group("/admin/payment")
 	adminGroup.Use(gin.HandlerFunc(adminAuth))
 	adminGroup.Use(middleware.AdminComplianceGuard(settingService))
+	adminGroup.Use(middleware.AdminOnly())
 	{
 		// Dashboard
 		adminGroup.GET("/dashboard", adminPaymentHandler.GetDashboard)

@@ -45,7 +45,8 @@ func TestAdminAuthJWTValidatesTokenVersion(t *testing.T) {
 	router := gin.New()
 	router.Use(gin.HandlerFunc(NewAdminAuthMiddleware(authService, userService, nil)))
 	router.GET("/t", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
+		role, _ := GetUserRoleFromContext(c)
+		c.JSON(http.StatusOK, gin.H{"ok": true, "role": role})
 	})
 
 	t.Run("token_version_mismatch_rejected", func(t *testing.T) {
@@ -121,10 +122,67 @@ func TestAdminAuthJWTValidatesTokenVersion(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, w.Code)
 	})
+
+	t.Run("operator_jwt_allows_admin_auth", func(t *testing.T) {
+		admin.Role = service.RoleOperator
+		defer func() { admin.Role = service.RoleAdmin }()
+
+		token, err := authService.GenerateToken(&service.User{
+			ID: admin.ID, Email: admin.Email, Role: service.RoleAdmin, TokenVersion: admin.TokenVersion,
+		})
+		require.NoError(t, err)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/t", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		router.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		require.Contains(t, w.Body.String(), `"role":"operator"`)
+	})
+
+	t.Run("user_jwt_is_rejected", func(t *testing.T) {
+		admin.Role = service.RoleUser
+		defer func() { admin.Role = service.RoleAdmin }()
+
+		token, err := authService.GenerateToken(admin)
+		require.NoError(t, err)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/t", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		router.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusForbidden, w.Code)
+	})
+}
+
+func TestAdminAPIKeyRetainsFullAdminRole(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	settingService := service.NewSettingService(&bmSettingRepo{values: map[string]string{
+		service.SettingKeyAdminAPIKey: "admin-secret",
+	}}, &config.Config{})
+	userService := service.NewUserService(&stubUserRepo{
+		getFirstAdmin: func(context.Context) (*service.User, error) {
+			return &service.User{ID: 1, Role: service.RoleAdmin, Status: service.StatusActive}, nil
+		},
+	}, nil, nil, nil)
+
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAdminAuthMiddleware(nil, userService, settingService)))
+	router.Use(AdminOnly())
+	router.GET("/admin-only", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/admin-only", nil)
+	req.Header.Set("x-api-key", "admin-secret")
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
 }
 
 type stubUserRepo struct {
-	getByID func(ctx context.Context, id int64) (*service.User, error)
+	getByID       func(ctx context.Context, id int64) (*service.User, error)
+	getFirstAdmin func(ctx context.Context) (*service.User, error)
 }
 
 func (s *stubUserRepo) Create(ctx context.Context, user *service.User) error {
@@ -143,7 +201,10 @@ func (s *stubUserRepo) GetByEmail(ctx context.Context, email string) (*service.U
 }
 
 func (s *stubUserRepo) GetFirstAdmin(ctx context.Context) (*service.User, error) {
-	panic("unexpected GetFirstAdmin call")
+	if s.getFirstAdmin == nil {
+		panic("unexpected GetFirstAdmin call")
+	}
+	return s.getFirstAdmin(ctx)
 }
 
 func (s *stubUserRepo) Update(ctx context.Context, user *service.User) error {

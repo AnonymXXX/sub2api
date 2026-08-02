@@ -50,19 +50,19 @@ vi.mock('vue-i18n', async () => {
 // Mock the admin API module — we control searchUsers return value per test
 const mockSearchUsers = vi.fn()
 const mockSearchApiKeys = vi.fn().mockResolvedValue([])
-const mockGroupsList = vi.fn().mockResolvedValue({ items: [] })
+const mockListGroups = vi.fn().mockResolvedValue([])
 const mockGetModelStats = vi.fn().mockResolvedValue({ models: [] })
-const mockAccountsList = vi.fn().mockResolvedValue({ items: [] })
+const mockSearchAccounts = vi.fn().mockResolvedValue([])
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     usage: {
       searchUsers: (...args: any[]) => mockSearchUsers(...args),
       searchApiKeys: (...args: any[]) => mockSearchApiKeys(...args),
+      searchAccounts: (...args: any[]) => mockSearchAccounts(...args),
+      listGroups: (...args: any[]) => mockListGroups(...args),
     },
-    groups: { list: (...args: any[]) => mockGroupsList(...args) },
     dashboard: { getModelStats: (...args: any[]) => mockGetModelStats(...args) },
-    accounts: { list: (...args: any[]) => mockAccountsList(...args) },
   },
 }))
 
@@ -169,7 +169,7 @@ describe('UsageFilters — model options come from prop (no dup request)', () =>
   beforeEach(() => {
     vi.useFakeTimers()
     mockGetModelStats.mockClear()
-    mockGroupsList.mockClear()
+    mockListGroups.mockClear()
   })
   afterEach(() => { vi.useRealTimers() })
 
@@ -191,5 +191,25 @@ describe('UsageFilters — model options come from prop (no dup request)', () =>
 
     const opts = (wrapper.vm as any).modelOptions as Array<{ value: string | null; label: string }>
     expect(opts.map((o) => o.value)).toEqual([null, 'claude-3', 'gpt-4o'])
+  })
+})
+
+describe('UsageFilters — cleanup permission', () => {
+  it('hides cleanup while keeping export in read-only mode', () => {
+    const wrapper = mount(UsageFilters, {
+      props: {
+        modelValue: defaultFilters(),
+        exporting: false,
+        startDate: '2026-05-01',
+        endDate: '2026-05-28',
+        showActions: true,
+        canCleanup: false,
+        modelOptions: [],
+      },
+      global: { stubs: { Select: true, Teleport: true } },
+    })
+
+    expect(wrapper.text()).not.toContain('Cleanup')
+    expect(wrapper.text()).toContain('Export')
   })
 })

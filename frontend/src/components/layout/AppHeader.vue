@@ -111,8 +111,8 @@
               <div class="text-sm font-medium text-gray-900 dark:text-white">
                 {{ displayName }}
               </div>
-              <div class="text-xs capitalize text-gray-500 dark:text-dark-400">
-                {{ user.role }}
+              <div class="text-xs text-gray-500 dark:text-dark-400">
+                {{ roleLabel }}
               </div>
             </div>
             <Icon name="chevronDown" size="sm" class="hidden text-gray-400 md:block" />
@@ -295,6 +295,12 @@ const userInitials = computed(() => {
 const displayName = computed(() => {
   if (!user.value) return ''
   return user.value.username || user.value.email?.split('@')[0] || ''
+})
+
+const roleLabel = computed(() => {
+  if (user.value?.role === 'admin') return t('profile.administrator')
+  if (user.value?.role === 'operator') return t('profile.operator')
+  return t('profile.user')
 })
 
 const pageTitle = computed(() => {

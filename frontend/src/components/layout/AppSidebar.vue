@@ -32,7 +32,7 @@
     <!-- Navigation -->
     <nav ref="sidebarNavRef" class="sidebar-nav scrollbar-hide">
       <!-- Admin View: Admin menu first, then personal menu -->
-      <template v-if="isAdmin">
+      <template v-if="canAccessAdminPanel">
         <!-- Admin Section -->
         <div class="sidebar-section">
           <template v-for="item in adminNavItems" :key="item.path">
@@ -247,10 +247,11 @@ const { canUseBatchImage, refreshBatchImageAccess } = useBatchImageAccess()
 const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
 const mobileOpen = computed(() => appStore.mobileOpen)
 const isAdmin = computed(() => authStore.isAdmin)
+const canAccessAdminPanel = computed(() => authStore.canAccessAdminPanel)
 const sidebarNavRef = ref<HTMLElement | null>(null)
 const isDark = ref(document.documentElement.classList.contains('dark'))
 
-const homePath = computed(() => (isAdmin.value ? '/admin/dashboard' : '/dashboard'))
+const homePath = computed(() => authStore.homePath)
 
 // Track which parent nav groups are expanded
 const expandedGroups = ref<Set<string>>(new Set())
@@ -751,6 +752,13 @@ const customMenuItemsForAdmin = computed(() => {
 
 // Admin navigation items
 const adminNavItems = computed((): NavItem[] => {
+  if (authStore.isOperator) {
+    return applyFeatureFlags([
+      { path: '/admin/dashboard', label: t('nav.dashboard'), icon: DashboardIcon },
+      { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon, featureFlag: flagOpsMonitoring },
+      { path: '/admin/usage', label: t('nav.usage'), icon: ChartIcon }
+    ])
+  }
   const baseItems: NavItem[] = [
     { path: '/admin/dashboard', label: t('nav.dashboard'), icon: DashboardIcon },
     { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon, featureFlag: flagOpsMonitoring },

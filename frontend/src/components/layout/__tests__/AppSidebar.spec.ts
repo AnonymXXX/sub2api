@@ -53,3 +53,13 @@ describe('AppSidebar header styles', () => {
     expect(sidebarBrandBlockMatch?.[0]).not.toContain('overflow: hidden;')
   })
 })
+
+describe('AppSidebar operator navigation', () => {
+  it('shows only the three approved admin routes and retains personal navigation', () => {
+    expect(componentSource).toContain('if (authStore.isOperator)')
+    expect(componentSource).toContain("{ path: '/admin/dashboard'")
+    expect(componentSource).toContain("{ path: '/admin/ops'")
+    expect(componentSource).toContain("{ path: '/admin/usage'")
+    expect(componentSource).toContain('personalNavItems')
+  })
+})

@@ -23,7 +23,7 @@ func NewAdminAuthMiddleware(
 // adminAuth 管理员认证中间件实现
 // 支持两种认证方式（通过不同的 header 区分）：
 // 1. Admin API Key: x-api-key: <admin-api-key>
-// 2. JWT Token: Authorization: Bearer <jwt-token> (需要管理员角色)
+// 2. JWT Token: Authorization: Bearer <jwt-token> (需要管理面板角色)
 func adminAuth(
 	authService *service.AuthService,
 	userService *service.UserService,
@@ -150,7 +150,7 @@ func validateAdminAPIKey(
 	return true
 }
 
-// validateJWTForAdmin 验证 JWT 并检查管理员权限
+// validateJWTForAdmin 验证 JWT 并检查管理面板权限
 func validateJWTForAdmin(
 	c *gin.Context,
 	token string,
@@ -187,9 +187,9 @@ func validateJWTForAdmin(
 		return false
 	}
 
-	// 检查管理员权限
-	if !user.IsAdmin() {
-		AbortWithError(c, 403, "FORBIDDEN", "Admin access required")
+	// 检查管理面板权限；具体能力由路由级权限中间件继续约束。
+	if !user.CanAccessAdminPanel() {
+		AbortWithError(c, 403, "FORBIDDEN", "Admin panel access required")
 		return false
 	}
 

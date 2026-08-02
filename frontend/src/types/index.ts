@@ -63,6 +63,9 @@ export interface UserProfileSourceContext {
   provider_label?: string | null
 }
 
+export type UserRole = 'admin' | 'operator' | 'user'
+export type AdminPermission = 'admin.dashboard.read' | 'admin.ops.read' | 'admin.usage.read'
+
 export interface User {
   id: number
   username: string
@@ -84,7 +87,7 @@ export interface User {
   linuxdo_bound?: boolean
   oidc_bound?: boolean
   wechat_bound?: boolean
-  role: 'admin' | 'user' // User role for authorization
+  role: UserRole // User role for authorization
   balance: number // User balance for API usage
   frozen_balance?: number // Balance currently held by async batch jobs
   concurrency: number // Allowed concurrent requests
@@ -1659,7 +1662,7 @@ export interface UpdateUserRequest {
   password?: string
   username?: string
   notes?: string
-  role?: 'admin' | 'user'
+  role?: UserRole
   balance?: number
   concurrency?: number
   status?: 'active' | 'disabled'

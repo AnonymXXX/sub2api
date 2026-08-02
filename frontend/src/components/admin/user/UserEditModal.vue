@@ -33,6 +33,7 @@
         <label class="input-label">{{ t('admin.users.form.roleLabel') }}</label>
         <select v-model="form.role" class="input">
           <option value="user">{{ t('admin.users.roles.user') }}</option>
+          <option value="operator">{{ t('admin.users.roles.operator') }}</option>
           <option value="admin">{{ t('admin.users.roles.admin') }}</option>
         </select>
       </div>
@@ -75,7 +76,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useClipboard } from '@/composables/useClipboard'
 import { adminAPI } from '@/api/admin'
-import type { AdminUser, UserAttributeValuesMap } from '@/types'
+import type { AdminUser, UserAttributeValuesMap, UserRole } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import UserAttributeForm from '@/components/user/UserAttributeForm.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -85,7 +86,7 @@ const emit = defineEmits(['close', 'success'])
 const { t } = useI18n(); const appStore = useAppStore(); const { copyToClipboard } = useClipboard()
 
 const submitting = ref(false); const passwordCopied = ref(false)
-const form = reactive({ email: '', password: '', username: '', notes: '', role: 'user', concurrency: 1, rpm_limit: 0, customAttributes: {} as UserAttributeValuesMap })
+const form = reactive({ email: '', password: '', username: '', notes: '', role: 'user' as UserRole, concurrency: 1, rpm_limit: 0, customAttributes: {} as UserAttributeValuesMap })
 
 watch(() => props.user, (u) => {
   if (u) {

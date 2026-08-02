@@ -17,7 +17,7 @@ import { resolveRouteDocumentTitle } from './title'
 /**
  * Route definitions with lazy loading
  */
-const routes: RouteRecordRaw[] = [
+export const routes: RouteRecordRaw[] = [
   // ==================== Setup Routes ====================
   {
     path: '/setup',
@@ -397,7 +397,7 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/admin/DashboardView.vue'),
     meta: {
       requiresAuth: true,
-      requiresAdmin: true,
+      requiresAdminPermission: 'admin.dashboard.read',
       title: 'Admin Dashboard',
       titleKey: 'admin.dashboard.title',
       descriptionKey: 'admin.dashboard.description'
@@ -409,7 +409,7 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/admin/ops/OpsDashboard.vue'),
     meta: {
       requiresAuth: true,
-      requiresAdmin: true,
+      requiresAdminPermission: 'admin.ops.read',
       title: 'Ops Monitoring',
       titleKey: 'admin.ops.title',
       descriptionKey: 'admin.ops.description'
@@ -581,7 +581,7 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/admin/UsageView.vue'),
     meta: {
       requiresAuth: true,
-      requiresAdmin: true,
+      requiresAdminPermission: 'admin.usage.read',
       title: 'Usage Records',
       titleKey: 'admin.usage.title',
       descriptionKey: 'admin.usage.description'
@@ -755,12 +755,13 @@ router.beforeEach(async (to, _from, next) => {
   // Check if route requires authentication
   const requiresAuth = to.meta.requiresAuth !== false // Default to true
   const requiresAdmin = to.meta.requiresAdmin === true
+  const requiredAdminPermission = to.meta.requiresAdminPermission
 
   if (to.path === '/setup') {
     try {
       const status = await getSetupStatus()
       if (!status.needs_setup) {
-        next(resolveCompletedSetupRedirectPath(authStore.isAuthenticated, authStore.isAdmin))
+        next(resolveCompletedSetupRedirectPath(authStore.isAuthenticated, authStore.canAccessAdminPanel))
         return
       }
     } catch {
@@ -774,12 +775,12 @@ router.beforeEach(async (to, _from, next) => {
     if (authStore.isAuthenticated && (to.path === '/login' || to.path === '/register')) {
       // In backend mode, non-admin users should NOT be redirected away from login
       // (they are blocked from all protected routes, so redirecting would cause a loop)
-      if (appStore.backendModeEnabled && !authStore.isAdmin) {
+      if (appStore.backendModeEnabled && !authStore.canAccessAdminPanel) {
         next()
         return
       }
       // Admin users go to admin dashboard, regular users go to user dashboard
-      next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+      next(authStore.homePath)
       return
     }
     // Backend mode: block public pages for unauthenticated users (except login, key-usage, setup)
@@ -806,12 +807,16 @@ router.beforeEach(async (to, _from, next) => {
 
   // Check admin requirement
   if (requiresAdmin && !authStore.isAdmin) {
-    // User is authenticated but not admin, redirect to user dashboard
-    next('/dashboard')
+    next(authStore.canAccessAdminPanel ? '/admin/dashboard' : '/dashboard')
     return
   }
 
-  if (requiresAdmin && authStore.isAdmin) {
+  if (requiredAdminPermission && !authStore.hasAdminPermission(requiredAdminPermission)) {
+    next(authStore.canAccessAdminPanel ? '/admin/dashboard' : '/dashboard')
+    return
+  }
+
+  if ((requiresAdmin || requiredAdminPermission) && authStore.canAccessAdminPanel) {
     const adminComplianceStore = useAdminComplianceStore()
     if (!adminComplianceStore.initialized) {
       try {
@@ -844,7 +849,7 @@ router.beforeEach(async (to, _from, next) => {
     appStore.publicSettingsLoaded &&
     appStore.cachedPublicSettings?.payment_enabled === false
   ) {
-    next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+    next(authStore.homePath)
     return
   }
 
@@ -853,7 +858,7 @@ router.beforeEach(async (to, _from, next) => {
     appStore.publicSettingsLoaded &&
     appStore.cachedPublicSettings?.risk_control_enabled === false
   ) {
-    next(authStore.isAdmin ? '/admin/settings' : '/dashboard')
+    next(authStore.isAdmin ? '/admin/settings' : authStore.homePath)
     return
   }
 
@@ -869,14 +874,14 @@ router.beforeEach(async (to, _from, next) => {
 
     if (restrictedPaths.some((path) => to.path.startsWith(path))) {
       // 简易模式下访问受限页面,重定向到仪表板
-      next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+      next(authStore.homePath)
       return
     }
   }
 
-  // Backend mode: admin gets full access, non-admin blocked
+  // Backend mode: panel roles retain access, non-panel users are blocked.
   if (appStore.backendModeEnabled) {
-    if (authStore.isAuthenticated && authStore.isAdmin) {
+    if (authStore.isAuthenticated && authStore.canAccessAdminPanel) {
       next()
       return
     }

@@ -49,6 +49,7 @@ func TestAdminComplianceGuardBlocksAdminRouteWhenMissing(t *testing.T) {
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		c.Set(string(ContextKeyUser), AuthSubject{UserID: 1})
+		c.Set(string(ContextKeyUserRole), service.RoleOperator)
 		c.Next()
 	})
 	router.Use(AdminComplianceGuard(svc))

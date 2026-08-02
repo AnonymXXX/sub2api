@@ -38,6 +38,11 @@ export interface SimpleApiKey {
   user_id: number
 }
 
+export interface SimpleUsageOption {
+  id: number
+  name: string
+}
+
 export interface UsageCleanupFilters {
   start_time: string
   end_time: string
@@ -167,6 +172,18 @@ export async function searchApiKeys(userId?: number, keyword?: string): Promise<
   return data
 }
 
+export async function searchAccounts(keyword: string): Promise<SimpleUsageOption[]> {
+  const { data } = await apiClient.get<SimpleUsageOption[]>('/admin/usage/search-accounts', {
+    params: { q: keyword }
+  })
+  return data
+}
+
+export async function listGroups(): Promise<SimpleUsageOption[]> {
+  const { data } = await apiClient.get<SimpleUsageOption[]>('/admin/usage/groups')
+  return data
+}
+
 /**
  * List usage cleanup tasks (admin only)
  * @param params - Query parameters for pagination
@@ -209,6 +226,8 @@ export const adminUsageAPI = {
   getStats,
   searchUsers,
   searchApiKeys,
+  searchAccounts,
+  listGroups,
   listCleanupTasks,
   createCleanupTask,
   cancelCleanupTask

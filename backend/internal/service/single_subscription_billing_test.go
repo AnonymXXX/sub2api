@@ -288,6 +288,32 @@ func TestCheckBillingEligibilityFallsBackToBalanceWhenSubscriptionQuotaIsExhaust
 	require.Same(t, balanceGroup, apiKey.Group)
 }
 
+func TestCheckBillingEligibilityRejectsExhaustedSubscriptionWithNegativeBalance(t *testing.T) {
+	limit := 75.0
+	cache := &subscriptionFallbackCacheStub{
+		balanceEligibilityCacheStub: balanceEligibilityCacheStub{balance: -3.39},
+		subscription: &SubscriptionCacheData{
+			Status: SubscriptionStatusActive, ExpiresAt: time.Now().Add(time.Hour), DailyUsage: limit,
+		},
+	}
+	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{}, nil)
+	t.Cleanup(svc.Stop)
+
+	balanceGroup := &Group{ID: 1, Status: StatusActive, Platform: PlatformOpenAI, SubscriptionType: SubscriptionTypeStandard}
+	subscriptionGroup := &Group{ID: 2, Status: StatusActive, Platform: PlatformOpenAI, SubscriptionType: SubscriptionTypeSubscription, DailyLimitUSD: &limit}
+	apiKey := &APIKey{
+		User: &User{ID: 42}, GroupID: &subscriptionGroup.ID, Group: subscriptionGroup,
+		BalanceGroupID: &balanceGroup.ID, BalanceGroup: balanceGroup,
+	}
+	subscription := &UserSubscription{ID: 9, UserID: 42, GroupID: subscriptionGroup.ID}
+
+	err := svc.CheckBillingEligibility(context.Background(), apiKey.User, apiKey, subscriptionGroup, subscription, PlatformOpenAI)
+
+	require.ErrorIs(t, err, ErrInsufficientBalance)
+	require.Equal(t, subscriptionGroup.ID, *apiKey.GroupID)
+	require.Same(t, subscriptionGroup, apiKey.Group)
+}
+
 type subscriptionFallbackCacheStub struct {
 	balanceEligibilityCacheStub
 	subscription *SubscriptionCacheData

@@ -23,6 +23,21 @@ type balanceEligibilityCacheStub struct {
 	invalidateCalls          atomic.Int64
 }
 
+type subscriptionInvalidationCacheStub struct {
+	billingCacheWorkerStub
+
+	invalidateCalls atomic.Int64
+	userID          int64
+	groupID         int64
+}
+
+func (s *subscriptionInvalidationCacheStub) InvalidateSubscriptionCache(_ context.Context, userID, groupID int64) error {
+	s.invalidateCalls.Add(1)
+	s.userID = userID
+	s.groupID = groupID
+	return nil
+}
+
 func (s *balanceEligibilityCacheStub) GetUserBalance(context.Context, int64) (float64, error) {
 	if s.cacheMissAfterInvalidate && s.invalidated.Load() {
 		return 0, errors.New("cache miss")
@@ -125,4 +140,23 @@ func TestSyncBalanceCacheAfterDeduction_QueuesDeductWhenBalanceStillEligible(t *
 	require.Eventually(t, func() bool {
 		return cache.deductCalls.Load() == 1
 	}, 2*time.Second, 10*time.Millisecond)
+}
+
+func TestSyncSubscriptionCacheAfterQuotaFallback_InvalidatesExhaustedSubscription(t *testing.T) {
+	cache := &subscriptionInvalidationCacheStub{}
+	cfg := &config.Config{}
+	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(svc.Stop)
+
+	groupID := int64(20)
+	syncSubscriptionCacheAfterQuotaFallback(context.Background(), &postUsageBillingParams{
+		User:   &User{ID: 10},
+		APIKey: &APIKey{GroupID: &groupID},
+	}, &billingDeps{billingCacheService: svc}, &UsageBillingApplyResult{
+		SubscriptionQuotaExhausted: true,
+	})
+
+	require.Equal(t, int64(1), cache.invalidateCalls.Load())
+	require.Equal(t, int64(10), cache.userID)
+	require.Equal(t, int64(20), cache.groupID)
 }

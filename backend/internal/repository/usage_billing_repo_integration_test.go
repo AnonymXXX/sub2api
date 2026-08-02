@@ -128,6 +128,76 @@ func TestUsageBillingRepositoryApply_DeduplicatesSubscriptionBilling(t *testing.
 	require.InDelta(t, 2.5, dailyUsage, 0.000001)
 }
 
+func TestUsageBillingRepositoryApply_SaturatesExhaustedSubscriptionBeforeBalanceFallback(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := NewUsageBillingRepository(client, integrationDB)
+
+	dailyLimit := 75.0
+	user := mustCreateUser(t, client, &service.User{
+		Email:        fmt.Sprintf("usage-billing-quota-fallback-%d@example.com", time.Now().UnixNano()),
+		PasswordHash: "hash",
+		Balance:      0.05,
+	})
+	balanceGroup := mustCreateGroup(t, client, &service.Group{
+		Name:             "usage-billing-balance-" + uuid.NewString(),
+		Platform:         service.PlatformOpenAI,
+		SubscriptionType: service.SubscriptionTypeStandard,
+	})
+	subscriptionGroup := mustCreateGroup(t, client, &service.Group{
+		Name:             "usage-billing-subscription-" + uuid.NewString(),
+		Platform:         service.PlatformOpenAI,
+		SubscriptionType: service.SubscriptionTypeSubscription,
+		DailyLimitUSD:    &dailyLimit,
+	})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{
+		UserID:  user.ID,
+		GroupID: &balanceGroup.ID,
+		Key:     "sk-usage-billing-quota-fallback-" + uuid.NewString(),
+		Name:    "billing-quota-fallback",
+	})
+	subscription := mustCreateSubscription(t, client, &service.UserSubscription{
+		UserID:        user.ID,
+		GroupID:       subscriptionGroup.ID,
+		DailyUsageUSD: 74.99,
+	})
+	_, err := integrationDB.ExecContext(ctx,
+		"UPDATE user_subscriptions SET daily_window_start = NOW() WHERE id = $1",
+		subscription.ID,
+	)
+	require.NoError(t, err)
+
+	result, err := repo.Apply(ctx, &service.UsageBillingCommand{
+		RequestID:           uuid.NewString(),
+		APIKeyID:            apiKey.ID,
+		UserID:              user.ID,
+		SubscriptionID:      &subscription.ID,
+		SubscriptionGroupID: &subscriptionGroup.ID,
+		BalanceGroupID:      &balanceGroup.ID,
+		BillingType:         service.BillingTypeSubscription,
+		SubscriptionCost:    0.08,
+		FallbackBalanceCost: 0.08,
+	})
+
+	require.NoError(t, err)
+	require.True(t, result.Applied)
+	require.True(t, result.SubscriptionQuotaExhausted)
+	require.Equal(t, service.BillingTypeBalance, result.FinalBillingType)
+	require.True(t, result.BalanceOverdrafted)
+
+	var dailyUsage, balance float64
+	require.NoError(t, integrationDB.QueryRowContext(ctx,
+		"SELECT daily_usage_usd FROM user_subscriptions WHERE id = $1",
+		subscription.ID,
+	).Scan(&dailyUsage))
+	require.NoError(t, integrationDB.QueryRowContext(ctx,
+		"SELECT balance FROM users WHERE id = $1",
+		user.ID,
+	).Scan(&balance))
+	require.InDelta(t, dailyLimit, dailyUsage, 0.000001)
+	require.InDelta(t, -0.03, balance, 0.000001)
+}
+
 func TestUsageBillingRepositoryApply_RequestFingerprintConflict(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)

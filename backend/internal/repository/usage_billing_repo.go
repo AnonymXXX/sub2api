@@ -186,6 +186,11 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 		if applied {
 			balanceCost = 0
 		} else {
+			exhausted, err := markUsageBillingSubscriptionQuotaExhausted(ctx, tx, cmd)
+			if err != nil {
+				return err
+			}
+			result.SubscriptionQuotaExhausted = exhausted
 			result.FinalBillingType = service.BillingTypeBalance
 			result.FinalGroupID = cloneInt64Ptr(cmd.BalanceGroupID)
 			result.FinalSubscriptionID = nil
@@ -237,6 +242,97 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 	}
 
 	return nil
+}
+
+// A post-response cost can be larger than the subscription's remaining quota.
+// Saturate only the exceeded windows so preflight cannot repeatedly select the
+// same just-below-limit subscription and overdraft the balance on every request.
+func markUsageBillingSubscriptionQuotaExhausted(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand) (bool, error) {
+	const updateSQL = `
+		UPDATE user_subscriptions us
+		SET
+			daily_usage_usd = CASE
+				WHEN g.daily_limit_usd IS NOT NULL AND g.daily_limit_usd > 0
+					AND (CASE WHEN us.daily_window_start IS NULL OR (
+						us.expires_at > us.starts_at + INTERVAL '1 day'
+						AND us.daily_window_start <= NOW() - INTERVAL '24 hours'
+					) THEN 0 ELSE us.daily_usage_usd END) + $1 > g.daily_limit_usd
+				THEN g.daily_limit_usd ELSE us.daily_usage_usd END,
+			weekly_usage_usd = CASE
+				WHEN g.weekly_limit_usd IS NOT NULL AND g.weekly_limit_usd > 0
+					AND (CASE WHEN us.weekly_window_start IS NULL OR us.weekly_window_start <= NOW() - INTERVAL '7 days'
+						THEN 0 ELSE us.weekly_usage_usd END) + $1 > g.weekly_limit_usd
+				THEN g.weekly_limit_usd ELSE us.weekly_usage_usd END,
+			monthly_usage_usd = CASE
+				WHEN g.monthly_limit_usd IS NOT NULL AND g.monthly_limit_usd > 0
+					AND (CASE WHEN us.monthly_window_start IS NULL OR us.monthly_window_start <= NOW() - INTERVAL '30 days'
+						THEN 0 ELSE us.monthly_usage_usd END) + $1 >
+						g.monthly_limit_usd + (CASE WHEN us.monthly_window_start IS NULL OR us.monthly_window_start <= NOW() - INTERVAL '30 days'
+							THEN 0 ELSE us.monthly_bonus_usd END)
+				THEN g.monthly_limit_usd + (CASE WHEN us.monthly_window_start IS NULL OR us.monthly_window_start <= NOW() - INTERVAL '30 days'
+					THEN 0 ELSE us.monthly_bonus_usd END)
+				ELSE us.monthly_usage_usd END,
+			daily_window_start = CASE
+				WHEN g.daily_limit_usd IS NOT NULL AND g.daily_limit_usd > 0
+					AND (us.daily_window_start IS NULL OR (
+						us.expires_at > us.starts_at + INTERVAL '1 day'
+						AND us.daily_window_start <= NOW() - INTERVAL '24 hours'
+					)) AND $1 > g.daily_limit_usd
+				THEN NOW() ELSE us.daily_window_start END,
+			weekly_window_start = CASE
+				WHEN g.weekly_limit_usd IS NOT NULL AND g.weekly_limit_usd > 0
+					AND (us.weekly_window_start IS NULL OR us.weekly_window_start <= NOW() - INTERVAL '7 days')
+					AND $1 > g.weekly_limit_usd
+				THEN NOW() ELSE us.weekly_window_start END,
+			monthly_window_start = CASE
+				WHEN g.monthly_limit_usd IS NOT NULL AND g.monthly_limit_usd > 0
+					AND (us.monthly_window_start IS NULL OR us.monthly_window_start <= NOW() - INTERVAL '30 days')
+					AND $1 > g.monthly_limit_usd
+				THEN NOW() ELSE us.monthly_window_start END,
+			monthly_bonus_usd = CASE
+				WHEN g.monthly_limit_usd IS NOT NULL AND g.monthly_limit_usd > 0
+					AND (us.monthly_window_start IS NULL OR us.monthly_window_start <= NOW() - INTERVAL '30 days')
+					AND $1 > g.monthly_limit_usd
+				THEN 0 ELSE us.monthly_bonus_usd END,
+			updated_at = NOW()
+		FROM groups g
+		WHERE us.id = $2
+			AND us.user_id = $3
+			AND us.group_id = $4
+			AND us.deleted_at IS NULL
+			AND us.group_id = g.id
+			AND g.deleted_at IS NULL
+			AND us.status = 'active'
+			AND us.starts_at <= NOW()
+			AND us.expires_at > NOW()
+			AND g.status = 'active'
+			AND g.subscription_type = 'subscription'
+			AND (
+				(g.daily_limit_usd IS NOT NULL AND g.daily_limit_usd > 0 AND
+					(CASE WHEN us.daily_window_start IS NULL OR (
+						us.expires_at > us.starts_at + INTERVAL '1 day'
+						AND us.daily_window_start <= NOW() - INTERVAL '24 hours'
+					) THEN 0 ELSE us.daily_usage_usd END) + $1 > g.daily_limit_usd)
+				OR (g.weekly_limit_usd IS NOT NULL AND g.weekly_limit_usd > 0 AND
+					(CASE WHEN us.weekly_window_start IS NULL OR us.weekly_window_start <= NOW() - INTERVAL '7 days'
+						THEN 0 ELSE us.weekly_usage_usd END) + $1 > g.weekly_limit_usd)
+				OR (g.monthly_limit_usd IS NOT NULL AND g.monthly_limit_usd > 0 AND
+					(CASE WHEN us.monthly_window_start IS NULL OR us.monthly_window_start <= NOW() - INTERVAL '30 days'
+						THEN 0 ELSE us.monthly_usage_usd END) + $1 >
+						g.monthly_limit_usd + (CASE WHEN us.monthly_window_start IS NULL OR us.monthly_window_start <= NOW() - INTERVAL '30 days'
+							THEN 0 ELSE us.monthly_bonus_usd END))
+			)
+		RETURNING us.id
+	`
+	var subscriptionID int64
+	err := tx.QueryRowContext(ctx, updateSQL, cmd.SubscriptionCost, *cmd.SubscriptionID, cmd.UserID, *cmd.SubscriptionGroupID).Scan(&subscriptionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand, result *service.UsageBillingApplyResult) (bool, error) {

@@ -21,6 +21,7 @@ const (
 	releaseBatchImageHoldSQL    = `(?s)UPDATE users\s+SET balance = balance \+ \$1,\s+frozen_balance = COALESCE\(frozen_balance, 0\) - \$1,\s+updated_at = NOW\(\)\s+WHERE id = \$2 AND deleted_at IS NULL AND COALESCE\(frozen_balance, 0\) >= \$1\s+RETURNING balance, frozen_balance`
 	userExistsForBillingSQL     = `(?s)SELECT 1\s+FROM users\s+WHERE id = \$1 AND deleted_at IS NULL`
 	subscriptionBillingSQL      = `(?s)UPDATE user_subscriptions us\s+SET.*monthly_bonus_usd = CASE.*THEN 0 ELSE us\.monthly_bonus_usd END.*FROM groups g.*RETURNING us\.id, us\.group_id`
+	exhaustSubscriptionQuotaSQL = `(?s)UPDATE user_subscriptions us\s+SET.*daily_usage_usd = CASE.*weekly_usage_usd = CASE.*monthly_usage_usd = CASE.*FROM groups g.*RETURNING us\.id`
 	apiKeyQuotaBillingSQL       = `(?s)UPDATE api_keys\s+SET quota_used = quota_used \+ \$1.*RETURNING quota > 0 AND quota_used >= quota AND quota_used - \$1 < quota`
 	apiKeyRateLimitBillingSQL   = `(?s)UPDATE api_keys SET\s+usage_5h = CASE.*WHERE id = \$2 AND deleted_at IS NULL`
 )
@@ -152,6 +153,9 @@ func TestApplyUsageBillingEffects_FallsBackToWholeBalanceCostWhenSubscriptionCan
 	mock.ExpectQuery(subscriptionBillingSQL).
 		WithArgs(1.25, int64(9), int64(42), int64(2)).
 		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(exhaustSubscriptionQuotaSQL).
+		WithArgs(1.25, int64(9), int64(42), int64(2)).
+		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(conditionalBalanceDeductSQL).
 		WithArgs(2.5, int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{"balance"}).AddRow(7.5))
@@ -178,6 +182,47 @@ func TestApplyUsageBillingEffects_FallsBackToWholeBalanceCostWhenSubscriptionCan
 	require.InDelta(t, 2.5, result.FinalCost, 0.000001)
 	require.NotNil(t, result.NewBalance)
 	require.InDelta(t, 7.5, *result.NewBalance, 0.000001)
+	require.NoError(t, tx.Commit())
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestApplyUsageBillingEffects_MarksSubscriptionQuotaExhaustedBeforeOverdraftFallback(t *testing.T) {
+	ctx := context.Background()
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	mock.ExpectQuery(subscriptionBillingSQL).
+		WithArgs(0.08, int64(9), int64(42), int64(2)).
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(exhaustSubscriptionQuotaSQL).
+		WithArgs(0.08, int64(9), int64(42), int64(2)).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(9)))
+	mock.ExpectQuery(conditionalBalanceDeductSQL).
+		WithArgs(0.08, int64(42)).
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(overdraftBalanceDeductSQL).
+		WithArgs(0.08, int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"balance"}).AddRow(-3.39))
+	mock.ExpectCommit()
+
+	subscriptionID, subscriptionGroupID, balanceGroupID := int64(9), int64(2), int64(1)
+	result := &service.UsageBillingApplyResult{Applied: true}
+	err = (&usageBillingRepository{}).applyUsageBillingEffects(ctx, tx, &service.UsageBillingCommand{
+		UserID: 42, BillingType: service.BillingTypeSubscription,
+		SubscriptionID: &subscriptionID, SubscriptionGroupID: &subscriptionGroupID, BalanceGroupID: &balanceGroupID,
+		SubscriptionCost: 0.08, FallbackBalanceCost: 0.08,
+	}, result)
+
+	require.NoError(t, err)
+	require.Equal(t, service.BillingTypeBalance, result.FinalBillingType)
+	require.True(t, result.SubscriptionQuotaExhausted)
+	require.True(t, result.BalanceOverdrafted)
+	require.NotNil(t, result.NewBalance)
+	require.InDelta(t, -3.39, *result.NewBalance, 0.000001)
 	require.NoError(t, tx.Commit())
 	require.NoError(t, mock.ExpectationsWereMet())
 }

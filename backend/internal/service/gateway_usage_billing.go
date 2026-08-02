@@ -363,6 +363,7 @@ func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, de
 	} else if p.Cost.ActualCost > 0 && p.User != nil {
 		syncBalanceCacheAfterDeduction(ctx, p, deps, result)
 	}
+	syncSubscriptionCacheAfterQuotaFallback(ctx, p, deps, result)
 
 	if p.Cost.ActualCost > 0 && p.APIKey != nil && p.APIKey.HasRateLimits() {
 		deps.billingCacheService.QueueUpdateAPIKeyRateLimitUsage(p.APIKey.ID, p.Cost.ActualCost)
@@ -408,6 +409,19 @@ func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, de
 	// no dependency on the request context or upstream connection.
 	go notifyBalanceLow(p, deps, result)
 	go notifyAccountQuota(p, deps, result)
+}
+
+func syncSubscriptionCacheAfterQuotaFallback(ctx context.Context, p *postUsageBillingParams, deps *billingDeps, result *UsageBillingApplyResult) {
+	if result == nil || !result.SubscriptionQuotaExhausted || p == nil || p.User == nil || p.APIKey == nil || p.APIKey.GroupID == nil || deps == nil || deps.billingCacheService == nil {
+		return
+	}
+	if err := deps.billingCacheService.InvalidateSubscription(ctx, p.User.ID, *p.APIKey.GroupID); err != nil {
+		slog.Warn("invalidate exhausted subscription cache failed",
+			"user_id", p.User.ID,
+			"group_id", *p.APIKey.GroupID,
+			"error", err,
+		)
+	}
 }
 
 func syncBalanceCacheAfterDeduction(ctx context.Context, p *postUsageBillingParams, deps *billingDeps, result *UsageBillingApplyResult) {

@@ -2,7 +2,7 @@
   <BaseDialog
     :show="show"
     :title="t('admin.accounts.reAuthorizeAccount')"
-    width="normal"
+    width="wide"
     @close="handleClose"
   >
     <div v-if="account" class="space-y-4">
@@ -197,6 +197,7 @@ import { useOpenAIOAuth } from '@/composables/useOpenAIOAuth'
 import { useGeminiOAuth } from '@/composables/useGeminiOAuth'
 import { useAntigravityOAuth } from '@/composables/useAntigravityOAuth'
 import { useGrokOAuth } from '@/composables/useGrokOAuth'
+import { useClipboard } from '@/composables/useClipboard'
 import type { Account } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -226,6 +227,7 @@ const emit = defineEmits<{
 
 const appStore = useAppStore()
 const { t } = useI18n()
+const { copyToClipboard } = useClipboard()
 
 // OAuth composables
 const claudeOAuth = useAccountOAuth()
@@ -240,6 +242,7 @@ const oauthFlowRef = ref<OAuthFlowExposed | null>(null)
 // State
 const addMethod = ref<AddMethod>('oauth')
 const geminiOAuthType = ref<'code_assist' | 'google_one' | 'ai_studio'>('code_assist')
+let authGenerationRequestId = 0
 
 // Computed - check platform
 const isOpenAI = computed(() => props.account?.platform === 'openai')
@@ -294,8 +297,10 @@ const canExchangeCode = computed(() => {
 
 // Watchers
 watch(
-  () => props.show,
-  (newVal) => {
+  () => [props.show, props.account?.id] as const,
+  async ([newVal]) => {
+    const requestId = ++authGenerationRequestId
+
     if (newVal && props.account) {
       // Initialize addMethod based on current account type (Claude only)
       if (
@@ -313,14 +318,18 @@ watch(
               ? 'ai_studio'
               : 'code_assist'
       }
+      if (isOpenAI.value) {
+        await generateOpenAIAuthUrlAndCopy(requestId)
+      }
     } else {
       resetState()
     }
-  }
+  },
+  { immediate: true }
 )
 
 // Methods
-const resetState = () => {
+function resetState() {
   addMethod.value = 'oauth'
   geminiOAuthType.value = 'code_assist'
   claudeOAuth.resetState()
@@ -335,11 +344,30 @@ const handleClose = () => {
   emit('close')
 }
 
+async function generateOpenAIAuthUrlAndCopy(requestId?: number) {
+  const account = props.account
+  if (!account || account.platform !== 'openai') return false
+
+  const generated = await openaiOAuth.generateAuthUrl(account.proxy_id)
+  const isCurrentRequest = requestId === undefined || requestId === authGenerationRequestId
+  if (
+    generated &&
+    isCurrentRequest &&
+    props.show &&
+    props.account?.id === account.id &&
+    openaiOAuth.authUrl.value
+  ) {
+    await copyToClipboard(openaiOAuth.authUrl.value)
+  }
+
+  return generated
+}
+
 const handleGenerateUrl = async () => {
   if (!props.account) return
 
   if (isOpenAILike.value) {
-    await openaiOAuth.generateAuthUrl(props.account.proxy_id)
+    await generateOpenAIAuthUrlAndCopy()
   } else if (isGemini.value) {
     const creds = (props.account.credentials || {}) as Record<string, unknown>
     const tierId = typeof creds.tier_id === 'string' ? creds.tier_id : undefined

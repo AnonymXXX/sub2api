@@ -133,6 +133,24 @@ func TestUserHandlerEndpoints(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 }
 
+func TestUserHandlerAcceptsOperatorRole(t *testing.T) {
+	router, _ := setupAdminRouter()
+
+	createBody := bytes.NewBufferString(`{"email":"operator@example.com","password":"pass123","role":"operator"}`)
+	createRec := httptest.NewRecorder()
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/admin/users", createBody)
+	createReq.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(createRec, createReq)
+	require.Equal(t, http.StatusOK, createRec.Code, createRec.Body.String())
+
+	updateBody := bytes.NewBufferString(`{"role":"operator"}`)
+	updateRec := httptest.NewRecorder()
+	updateReq := httptest.NewRequest(http.MethodPut, "/api/v1/admin/users/2", updateBody)
+	updateReq.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(updateRec, updateReq)
+	require.Equal(t, http.StatusOK, updateRec.Code, updateRec.Body.String())
+}
+
 func TestUserHandlerBindAuthIdentityMapsRequest(t *testing.T) {
 	router, adminSvc := setupAdminRouter()
 

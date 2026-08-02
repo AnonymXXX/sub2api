@@ -393,6 +393,14 @@
               </button>
               <button
                 v-if="row.status === 'active'"
+                @click="handleSwitch(row)"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-primary-50 hover:text-primary-600 dark:hover:bg-primary-900/20 dark:hover:text-primary-400"
+              >
+                <Icon name="swap" size="sm" />
+                <span class="text-xs">{{ t('admin.subscriptions.switch') }}</span>
+              </button>
+              <button
+                v-if="row.status === 'active'"
                 @click="handleResetQuota(row)"
                 :disabled="resettingQuota && resettingSubscription?.id === row.id"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-orange-50 hover:text-orange-600 dark:hover:bg-orange-900/20 dark:hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
@@ -654,6 +662,14 @@
       </template>
     </BaseDialog>
 
+    <SubscriptionSwitchDialog
+      :show="showSwitchModal"
+      :subscription="switchingSubscription"
+      :groups="groups"
+      @close="closeSwitchModal"
+      @success="handleSwitchSuccess"
+    />
+
     <!-- Revoke Confirmation Dialog -->
     <ConfirmDialog
       :show="showRevokeDialog"
@@ -831,6 +847,7 @@ import Select from '@/components/common/Select.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
 import Icon from '@/components/icons/Icon.vue'
+import SubscriptionSwitchDialog from './components/SubscriptionSwitchDialog.vue'
 import { getRemainingDurationParts, isOneTimeDailyQuota, type RemainingDurationParts } from '@/utils/subscriptionQuota'
 
 const { t } = useI18n()
@@ -1016,6 +1033,7 @@ const showRevokeDialog = ref(false)
 const showRestoreDialog = ref(false)
 const showResetQuotaConfirm = ref(false)
 const showMonthlyBonusModal = ref(false)
+const showSwitchModal = ref(false)
 const submitting = ref(false)
 const resettingSubscription = ref<UserSubscription | null>(null)
 const resettingQuota = ref(false)
@@ -1024,6 +1042,7 @@ const settingMonthlyBonus = ref(false)
 const extendingSubscription = ref<UserSubscription | null>(null)
 const revokingSubscription = ref<UserSubscription | null>(null)
 const restoringSubscription = ref<UserSubscription | null>(null)
+const switchingSubscription = ref<UserSubscription | null>(null)
 
 const assignForm = reactive({
   user_id: null as number | null,
@@ -1297,6 +1316,21 @@ const handleExtend = (subscription: UserSubscription) => {
   extendingSubscription.value = subscription
   extendForm.days = 30
   showExtendModal.value = true
+}
+
+const handleSwitch = (subscription: UserSubscription) => {
+  switchingSubscription.value = subscription
+  showSwitchModal.value = true
+}
+
+const closeSwitchModal = () => {
+  showSwitchModal.value = false
+  switchingSubscription.value = null
+}
+
+const handleSwitchSuccess = async () => {
+  closeSwitchModal()
+  await loadSubscriptions()
 }
 
 const closeExtendModal = () => {

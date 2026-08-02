@@ -45,6 +45,17 @@ var (
 	ErrSubscriptionNilInput        = infraerrors.BadRequest("SUBSCRIPTION_NIL_INPUT", "subscription input cannot be nil")
 	ErrAdjustWouldExpire           = infraerrors.BadRequest("ADJUST_WOULD_EXPIRE", "adjustment would result in expired subscription (remaining days must be > 0)")
 	ErrInvalidMonthlyBonus         = infraerrors.BadRequest("INVALID_MONTHLY_BONUS", "monthly bonus must be a finite non-negative number")
+	ErrSubscriptionSwitchSource    = infraerrors.Conflict("SUBSCRIPTION_SWITCH_SOURCE_INVALID", "source subscription is no longer the user's only active subscription")
+	ErrSubscriptionSwitchSameGroup = infraerrors.BadRequest("SUBSCRIPTION_SWITCH_SAME_GROUP", "target group must be different from the current subscription group")
+	ErrSubscriptionSwitchInactive  = infraerrors.BadRequest("SUBSCRIPTION_SWITCH_TARGET_INACTIVE", "target subscription group is not active")
+	ErrSubscriptionSwitchPlatform  = infraerrors.BadRequest("SUBSCRIPTION_SWITCH_PLATFORM_MISMATCH", "target subscription group must use the same platform")
+	ErrSubscriptionSwitchDeps      = infraerrors.InternalServer("SUBSCRIPTION_SWITCH_UNAVAILABLE", "subscription switch dependencies are unavailable")
+)
+
+const (
+	QuotaWarningDaily   = "daily"
+	QuotaWarningWeekly  = "weekly"
+	QuotaWarningMonthly = "monthly"
 )
 
 type activeSubscriptionByUserRepository interface {
@@ -61,10 +72,12 @@ type monthlyBonusRepository interface {
 
 // SubscriptionService 订阅服务
 type SubscriptionService struct {
-	groupRepo           GroupRepository
-	userSubRepo         UserSubscriptionRepository
-	billingCacheService *BillingCacheService
-	entClient           *dbent.Client
+	groupRepo            GroupRepository
+	userSubRepo          UserSubscriptionRepository
+	apiKeyRepo           APIKeyRepository
+	authCacheInvalidator APIKeyAuthCacheInvalidator
+	billingCacheService  *BillingCacheService
+	entClient            *dbent.Client
 
 	// L1 缓存：加速中间件热路径的订阅查询
 	subCacheL1     *ristretto.Cache
@@ -77,16 +90,188 @@ type SubscriptionService struct {
 
 // NewSubscriptionService 创建订阅服务
 func NewSubscriptionService(groupRepo GroupRepository, userSubRepo UserSubscriptionRepository, billingCacheService *BillingCacheService, entClient *dbent.Client, cfg *config.Config) *SubscriptionService {
+	return NewSubscriptionServiceWithSwitchDependencies(groupRepo, userSubRepo, nil, nil, billingCacheService, entClient, cfg)
+}
+
+// NewSubscriptionServiceWithSwitchDependencies wires the repositories needed by
+// administrator plan switches while keeping the legacy constructor available to tests.
+func NewSubscriptionServiceWithSwitchDependencies(
+	groupRepo GroupRepository,
+	userSubRepo UserSubscriptionRepository,
+	apiKeyRepo APIKeyRepository,
+	authCacheInvalidator APIKeyAuthCacheInvalidator,
+	billingCacheService *BillingCacheService,
+	entClient *dbent.Client,
+	cfg *config.Config,
+) *SubscriptionService {
 	svc := &SubscriptionService{
-		groupRepo:           groupRepo,
-		userSubRepo:         userSubRepo,
-		billingCacheService: billingCacheService,
-		entClient:           entClient,
+		groupRepo:            groupRepo,
+		userSubRepo:          userSubRepo,
+		apiKeyRepo:           apiKeyRepo,
+		authCacheInvalidator: authCacheInvalidator,
+		billingCacheService:  billingCacheService,
+		entClient:            entClient,
 	}
 	svc.initSubCache(cfg)
 	svc.initMaintenanceQueue(cfg)
 	svc.StartSubCacheInvalidationSubscriber(context.Background())
 	return svc
+}
+
+// SwitchSubscriptionResult is returned after an administrator moves an active
+// subscription to another plan on the same platform.
+type SwitchSubscriptionResult struct {
+	Subscription           *UserSubscription
+	PreviousSubscriptionID int64
+	MigratedKeys           int64
+	QuotaWarnings          []string
+}
+
+// SwitchSubscription atomically replaces the user's only active subscription
+// and moves API keys that were explicitly bound to the source subscription group.
+func (s *SubscriptionService) SwitchSubscription(ctx context.Context, sourceSubscriptionID, targetGroupID, actorAdminID int64) (*SwitchSubscriptionResult, error) {
+	if s.groupRepo == nil || s.userSubRepo == nil || s.apiKeyRepo == nil {
+		return nil, ErrSubscriptionSwitchDeps
+	}
+
+	sourceSnapshot, err := s.userSubRepo.GetByID(ctx, sourceSubscriptionID)
+	if err != nil {
+		return nil, err
+	}
+	locker, ok := s.userSubRepo.(subscriptionUserLocker)
+	if !ok {
+		return nil, ErrSubscriptionSwitchDeps
+	}
+
+	var result *SwitchSubscriptionResult
+	var switchedUserID, sourceGroupID int64
+	err = s.withSubscriptionUpdateTx(ctx, func(txCtx context.Context) error {
+		if lockErr := locker.LockUser(txCtx, sourceSnapshot.UserID); lockErr != nil {
+			return fmt.Errorf("lock subscription user: %w", lockErr)
+		}
+
+		activeSubscriptions, listErr := s.userSubRepo.ListActiveByUserID(txCtx, sourceSnapshot.UserID)
+		if listErr != nil {
+			return fmt.Errorf("list active subscriptions: %w", listErr)
+		}
+		if len(activeSubscriptions) != 1 || activeSubscriptions[0].ID != sourceSubscriptionID {
+			return ErrSubscriptionSwitchSource
+		}
+		source := activeSubscriptions[0]
+		switchedUserID = source.UserID
+		sourceGroupID = source.GroupID
+		if source.GroupID == targetGroupID {
+			return ErrSubscriptionSwitchSameGroup
+		}
+
+		sourceGroup := source.Group
+		if sourceGroup == nil || sourceGroup.ID != source.GroupID {
+			sourceGroup, listErr = s.groupRepo.GetByID(txCtx, source.GroupID)
+			if listErr != nil {
+				return listErr
+			}
+		}
+		targetGroup, groupErr := s.groupRepo.GetByID(txCtx, targetGroupID)
+		if groupErr != nil {
+			return groupErr
+		}
+		if !targetGroup.IsActive() {
+			return ErrSubscriptionSwitchInactive
+		}
+		if !targetGroup.IsSubscriptionType() {
+			return ErrGroupNotSubscriptionType
+		}
+		if targetGroup.Platform != sourceGroup.Platform {
+			return ErrSubscriptionSwitchPlatform
+		}
+
+		targetHistory, historyErr := s.userSubRepo.GetByUserIDAndGroupID(txCtx, source.UserID, targetGroupID)
+		switch {
+		case historyErr == nil:
+			if deleteErr := s.userSubRepo.Delete(txCtx, targetHistory.ID); deleteErr != nil {
+				return fmt.Errorf("delete target subscription history: %w", deleteErr)
+			}
+		case errors.Is(historyErr, ErrSubscriptionNotFound):
+			// No conflicting non-deleted history exists for the target group.
+		default:
+			return fmt.Errorf("find target subscription history: %w", historyErr)
+		}
+
+		if deleteErr := s.userSubRepo.Delete(txCtx, source.ID); deleteErr != nil {
+			return fmt.Errorf("revoke source subscription: %w", deleteErr)
+		}
+
+		assignedAt := time.Now()
+		assignedBy := actorAdminID
+		created := &UserSubscription{
+			UserID:             source.UserID,
+			GroupID:            targetGroupID,
+			StartsAt:           source.StartsAt,
+			ExpiresAt:          source.ExpiresAt,
+			Status:             SubscriptionStatusActive,
+			DailyWindowStart:   source.DailyWindowStart,
+			WeeklyWindowStart:  source.WeeklyWindowStart,
+			MonthlyWindowStart: source.MonthlyWindowStart,
+			DailyUsageUSD:      source.DailyUsageUSD,
+			WeeklyUsageUSD:     source.WeeklyUsageUSD,
+			MonthlyUsageUSD:    source.MonthlyUsageUSD,
+			MonthlyBonusUSD:    source.MonthlyBonusUSD,
+			AssignedBy:         &assignedBy,
+			AssignedAt:         assignedAt,
+			Notes:              source.Notes,
+			User:               source.User,
+			Group:              targetGroup,
+		}
+		if createErr := s.userSubRepo.Create(txCtx, created); createErr != nil {
+			return fmt.Errorf("create target subscription: %w", createErr)
+		}
+
+		migratedKeys, migrateErr := s.apiKeyRepo.UpdateGroupIDByUserAndGroup(txCtx, source.UserID, source.GroupID, targetGroupID)
+		if migrateErr != nil {
+			return fmt.Errorf("migrate subscription api keys: %w", migrateErr)
+		}
+		result = &SwitchSubscriptionResult{
+			Subscription:           created,
+			PreviousSubscriptionID: source.ID,
+			MigratedKeys:           migratedKeys,
+			QuotaWarnings:          subscriptionQuotaWarnings(created, targetGroup),
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	s.invalidateSwitchCaches(switchedUserID, sourceGroupID, targetGroupID)
+	return result, nil
+}
+
+func subscriptionQuotaWarnings(sub *UserSubscription, group *Group) []string {
+	warnings := make([]string, 0, 3)
+	if group.HasDailyLimit() && sub.DailyUsageUSD >= *group.DailyLimitUSD {
+		warnings = append(warnings, QuotaWarningDaily)
+	}
+	if group.HasWeeklyLimit() && sub.WeeklyUsageUSD >= *group.WeeklyLimitUSD {
+		warnings = append(warnings, QuotaWarningWeekly)
+	}
+	if group.HasMonthlyLimit() && sub.MonthlyUsageUSD >= sub.EffectiveMonthlyLimitUSD(group) {
+		warnings = append(warnings, QuotaWarningMonthly)
+	}
+	return warnings
+}
+
+func (s *SubscriptionService) invalidateSwitchCaches(userID, oldGroupID, newGroupID int64) {
+	for _, groupID := range []int64{oldGroupID, newGroupID} {
+		if err := s.invalidateSubscriptionCaches(userID, groupID); err != nil {
+			log.Printf("Warning: subscription switch committed but cache invalidation failed for user=%d group=%d: %v", userID, groupID, err)
+		}
+	}
+	if s.authCacheInvalidator == nil {
+		return
+	}
+	cacheCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	s.authCacheInvalidator.InvalidateAuthCacheByUserID(cacheCtx, userID)
 }
 
 func (s *SubscriptionService) initMaintenanceQueue(cfg *config.Config) {

@@ -32,3 +32,23 @@ func TestSubscriptionHandlerResetQuotaUsesAdminIdempotency(t *testing.T) {
 
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 }
+
+func TestSubscriptionHandlerSwitchUsesAdminIdempotency(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service.SetDefaultIdempotencyCoordinator(service.NewIdempotencyCoordinator(storeUnavailableRepoStub{}, service.DefaultIdempotencyConfig()))
+	t.Cleanup(func() {
+		service.SetDefaultIdempotencyCoordinator(nil)
+	})
+
+	handler := NewSubscriptionHandler(nil)
+	router := gin.New()
+	router.POST("/api/v1/admin/subscriptions/:id/switch", handler.Switch)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/subscriptions/42/switch", bytes.NewBufferString(`{"target_group_id":20}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "switch-subscription-42-to-20")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+}

@@ -1745,6 +1745,19 @@ export interface ExtendSubscriptionRequest {
   days: number
 }
 
+export type SubscriptionQuotaWarning = 'daily' | 'weekly' | 'monthly'
+
+export interface SwitchSubscriptionRequest {
+  target_group_id: number
+}
+
+export interface SwitchSubscriptionResult {
+  subscription: UserSubscription
+  previous_subscription_id: number
+  migrated_keys: number
+  quota_warnings: SubscriptionQuotaWarning[]
+}
+
 // ==================== Query Parameters ====================
 
 export interface UserErrorRequest {

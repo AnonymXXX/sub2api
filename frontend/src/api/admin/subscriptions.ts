@@ -10,6 +10,8 @@ import type {
   AssignSubscriptionRequest,
   BulkAssignSubscriptionRequest,
   ExtendSubscriptionRequest,
+  SwitchSubscriptionRequest,
+  SwitchSubscriptionResult,
   PaginatedResponse
 } from '@/types'
 
@@ -107,6 +109,19 @@ export async function extend(
   const { data } = await apiClient.post<UserSubscription>(
     `/admin/subscriptions/${id}/extend`,
     request
+  )
+  return data
+}
+
+export async function switchSubscription(
+  id: number,
+  request: SwitchSubscriptionRequest,
+  idempotencyKey: string
+): Promise<SwitchSubscriptionResult> {
+  const { data } = await apiClient.post<SwitchSubscriptionResult>(
+    `/admin/subscriptions/${id}/switch`,
+    request,
+    { headers: { 'Idempotency-Key': idempotencyKey } }
   )
   return data
 }
@@ -209,6 +224,7 @@ export const subscriptionsAPI = {
   assign,
   bulkAssign,
   extend,
+  switchSubscription,
   revoke,
   restore,
   resetQuota,

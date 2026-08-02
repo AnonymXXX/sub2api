@@ -2,14 +2,19 @@
 
 ## Decision
 
-Sub2API gives each user at most one active subscription across the site. An
-active subscription cannot be upgraded, downgraded, or replaced, including by
-an administrator. The user may choose another plan only after the current
-subscription expires or is revoked.
+Sub2API gives each user at most one active subscription across the site. Users
+may choose another plan only after the current subscription expires or is
+revoked. An administrator may switch the active subscription to another active
+subscription group on the same platform without payment, refund, or price
+adjustment.
 
-Existing API keys keep their stored group. For every API request, the gateway
-first attempts to use the user's active subscription. It uses the subscription
-group only when the platform, model, capability, group status, and daily,
+Existing API keys normally keep their stored group. An administrator plan
+switch is the exception: non-deleted API keys bound to the source subscription
+group move to the target subscription group in the same transaction. Keys in
+standard groups and keys bound to any other group remain unchanged. For every
+API request, the gateway first attempts to use the user's active subscription.
+It uses the subscription group only when the platform, model, capability,
+group status, and daily,
 weekly, and effective monthly quotas all permit the request. Otherwise it uses
 the API key's original group and charges the user's balance. API key status,
 expiry, IP rules, key quota, and rate limits always apply.
@@ -40,6 +45,8 @@ assignments, redemption codes, default grants, renewals, and restoration.
 - A different active subscription blocks a new grant or restoration.
 - An administrator may adjust the dates of the same subscription without
   changing its plan.
+- An administrator switch replaces the only active subscription atomically; it
+  never creates a second active subscription.
 - A subscription is active only when its status is active, `starts_at <= now`,
   and `expires_at > now`; a future subscription does not participate in
   routing, billing, renewal, active-list responses, or active counts.
@@ -106,6 +113,46 @@ reset, renewal, expiry, or revocation.
 These administrator writes use the existing idempotency wrapper and HTTP access
 logging. This change does not introduce a general-purpose audit table.
 
+## Administrator Subscription Switching
+
+`POST /api/v1/admin/subscriptions/:id/switch` requires `Idempotency-Key` and
+accepts:
+
+```json
+{ "target_group_id": 10 }
+```
+
+The source must still be the user's only effective subscription after the user
+row is locked. The target group must be different, active, subscription-billed,
+and on the same platform. Switching does not create a payment, refund, or price
+adjustment.
+
+The switch uses one database transaction. Any non-effective, non-deleted
+subscription record for the target group is soft deleted first. The source is
+then soft deleted and a new target subscription is created with the source's
+`starts_at`, `expires_at`, daily/weekly/monthly window starts, corresponding
+usage, and `monthly_bonus_usd`. Historical usage logs are not rewritten.
+
+Only non-deleted API keys whose stored `group_id` equals the source subscription
+group move to the target group. Standard-group keys and other keys remain
+unchanged. After commit, both subscription-group caches and affected API-key
+authentication caches are invalidated. A remote cache notification failure is
+logged as a warning and does not turn a committed switch into an API failure.
+
+The response contains the new subscription, `previous_subscription_id`,
+`migrated_keys`, and `quota_warnings`. Warnings use `daily`, `weekly`, and
+`monthly` when carried usage has already reached the corresponding target
+limit. The monthly comparison includes the carried temporary quota. A warning
+does not block the switch; that period immediately uses balance fallback.
+
+Historical mismatches are repaired only through the standalone
+`subscription-key-repair` command. It is dry-run by default. Writes require both
+`--apply` and an exact `--expected-count`. Candidates must have exactly one
+effective subscription, a key bound to a different same-platform subscription
+group, and historical evidence that the user held that source group. The tool
+reports and skips standard groups, cross-platform rows, ambiguous sources, and
+soft-deleted keys. It never runs automatically as a startup migration.
+
 ## Data And API Contract
 
 - `user_subscriptions.monthly_bonus_usd` is a non-null decimal defaulting to 0.
@@ -123,7 +170,9 @@ logging. This change does not introduce a general-purpose audit table.
 
 - Subscription periods are fixed at 30 days.
 - Daily, weekly, and monthly quotas remain independent rolling windows.
-- The original API key group remains the balance-billing fallback group.
+- The API key's stored group remains the balance-billing fallback group. A
+  successful administrator subscription switch updates that stored group only
+  for keys bound to the source subscription group.
 - Temporary monthly quota does not bypass daily or weekly quota.
 - Existing API key restrictions continue to apply before either billing path.
 

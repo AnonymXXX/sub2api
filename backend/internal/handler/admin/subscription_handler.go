@@ -229,6 +229,36 @@ type SetMonthlyBonusRequest struct {
 	AmountUSD float64 `json:"amount_usd"`
 }
 
+type SwitchSubscriptionRequest struct {
+	TargetGroupID int64 `json:"target_group_id" binding:"required,gt=0"`
+}
+
+// Switch moves the user's active subscription to another plan on the same platform.
+// POST /api/v1/admin/subscriptions/:id/switch
+func (h *SubscriptionHandler) Switch(c *gin.Context) {
+	subscriptionID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || subscriptionID <= 0 {
+		response.BadRequest(c, "Invalid subscription ID")
+		return
+	}
+	var req SwitchSubscriptionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	payload := struct {
+		SubscriptionID int64                     `json:"subscription_id"`
+		Body           SwitchSubscriptionRequest `json:"body"`
+	}{SubscriptionID: subscriptionID, Body: req}
+	executeAdminIdempotentJSON(c, "admin.subscriptions.switch", payload, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
+		result, execErr := h.subscriptionService.SwitchSubscription(ctx, subscriptionID, req.TargetGroupID, getAdminIDFromContext(c))
+		if execErr != nil {
+			return nil, execErr
+		}
+		return dto.SwitchSubscriptionResultFromService(result), nil
+	})
+}
+
 // ResetQuota resets daily, weekly, and/or monthly usage for a subscription.
 // POST /api/v1/admin/subscriptions/:id/reset-quota
 func (h *SubscriptionHandler) ResetQuota(c *gin.Context) {

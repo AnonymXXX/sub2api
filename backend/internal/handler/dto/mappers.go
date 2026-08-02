@@ -755,6 +755,18 @@ func UserSubscriptionFromServiceAdmin(sub *service.UserSubscription) *AdminUserS
 	}
 }
 
+func SwitchSubscriptionResultFromService(result *service.SwitchSubscriptionResult) *AdminSwitchSubscriptionResult {
+	if result == nil {
+		return nil
+	}
+	return &AdminSwitchSubscriptionResult{
+		Subscription:           UserSubscriptionFromServiceAdmin(result.Subscription),
+		PreviousSubscriptionID: result.PreviousSubscriptionID,
+		MigratedKeys:           result.MigratedKeys,
+		QuotaWarnings:          result.QuotaWarnings,
+	}
+}
+
 func userSubscriptionFromServiceBase(sub *service.UserSubscription) UserSubscription {
 	out := UserSubscription{
 		ID:                 sub.ID,

@@ -637,6 +637,13 @@ type AdminUserSubscription struct {
 	AssignedByUser *User `json:"assigned_by_user,omitempty"`
 }
 
+type AdminSwitchSubscriptionResult struct {
+	Subscription           *AdminUserSubscription `json:"subscription"`
+	PreviousSubscriptionID int64                  `json:"previous_subscription_id"`
+	MigratedKeys           int64                  `json:"migrated_keys"`
+	QuotaWarnings          []string               `json:"quota_warnings"`
+}
+
 type BulkAssignResult struct {
 	SuccessCount  int                     `json:"success_count"`
 	CreatedCount  int                     `json:"created_count"`

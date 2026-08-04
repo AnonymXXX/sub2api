@@ -3972,11 +3972,9 @@ const form = reactive({
 })
 
 const getDefaultGroupIdsForPlatform = (platform: AccountPlatform): number[] => {
-  if (platform !== 'openai') return []
-  const openAIGroup = props.groups.find(
-    (group) => group.platform === 'openai' && group.name === 'openai'
-  )
-  return openAIGroup ? [openAIGroup.id] : []
+  return props.groups
+    .filter((group) => group.platform === platform)
+    .map((group) => group.id)
 }
 
 const applyDefaultGroupIds = (platform: AccountPlatform) => {

@@ -250,12 +250,12 @@ const openAIGroup = {
   account_count: 9
 }
 
-function mountModal(show = false) {
+function mountModal(show = false, groups = [openAIGroup]) {
   return mount(CreateAccountModal, {
     props: {
       show,
       proxies: [],
-      groups: [openAIGroup]
+      groups
     },
     global: {
       stubs: {
@@ -299,6 +299,17 @@ describe('CreateAccountModal', () => {
       'gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna,gpt-5.5,codex-auto-review,gpt-5.4,gpt-5.4-mini'
     )
     expect(wrapper.get('[data-testid="openai-codex-cli-only-toggle"]').classes()).toContain('bg-primary-600')
+  })
+
+  it('打开添加账号弹窗时默认选中当前平台的全部分组', async () => {
+    const openAIStandardGroup = { ...openAIGroup, id: 7, name: 'OpenAI Standard' }
+    const anthropicGroup = { ...openAIGroup, id: 8, name: 'Anthropic', platform: 'anthropic' as const }
+    const wrapper = mountModal(false, [openAIGroup, openAIStandardGroup, anthropicGroup])
+
+    await wrapper.setProps({ show: true })
+    await nextTick()
+
+    expect(wrapper.get('[data-testid="group-selector-value"]').text()).toBe('6,7')
   })
 
   it('切换到 OpenAI 时默认选择 Codex 相关模型', async () => {

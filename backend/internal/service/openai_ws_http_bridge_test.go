@@ -178,6 +178,75 @@ func TestOpenAIWSHTTPBridgeRelaysSSEFramesAsWebSocketMessages(t *testing.T) {
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
 }
 
+func TestOpenAIWSHTTPBridgeRewritesCapacityErrorCodeForClient(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	sseBody := strings.Join([]string{
+		`event: error`,
+		`data: {"type":"error","error":{"type":"service_unavailable_error","code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}}`,
+		"",
+	}, "\n")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type": []string{"text/event-stream"},
+			"x-request-id": []string{"rid_bridge_overloaded"},
+		},
+		Body: io.NopCloser(strings.NewReader(sseBody)),
+	}}
+	svc := &OpenAIGatewayService{
+		cfg: &config.Config{
+			Gateway: config.GatewayConfig{
+				MaxLineSize: defaultMaxLineSize,
+				OpenAIWS: config.GatewayOpenAIWSConfig{
+					HTTPBridgeEnabled:        true,
+					HTTPBridgeThresholdBytes: 1,
+				},
+			},
+		},
+		httpUpstream:  upstream,
+		toolCorrector: NewCodexToolCorrector(),
+	}
+	account := &Account{
+		ID:          8,
+		Name:        "api-key",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Status:      StatusActive,
+	}
+	payload := []byte(`{"type":"response.create","generate":true,"model":"gpt-5","stream":true,"input":"hi"}`)
+
+	rec := httptest.NewRecorder()
+	ginCtx, _ := gin.CreateTestContext(rec)
+	ginCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	var clientMessages [][]byte
+	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
+		context.Background(),
+		ginCtx,
+		account,
+		"sk-test",
+		payload,
+		len(payload),
+		"gpt-5",
+		"",
+		"",
+		"",
+		"",
+		1,
+		func(message []byte) error {
+			clientMessages = append(clientMessages, append([]byte(nil), message...))
+			return nil
+		},
+	)
+
+	require.ErrorContains(t, err, "Our servers are currently overloaded")
+	require.NotNil(t, result)
+	require.Len(t, clientMessages, 1)
+	require.Equal(t, "server_error", gjson.GetBytes(clientMessages[0], "error.code").String())
+	require.Equal(t, "Our servers are currently overloaded. Please try again later.", gjson.GetBytes(clientMessages[0], "error.message").String())
+}
+
 func TestProxyResponsesWebSocketFromClientForGrokUsesXAIHTTPBridgeAndPreservesMappedModels(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
